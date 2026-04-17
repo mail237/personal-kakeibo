@@ -4,7 +4,7 @@ import type { InputMode } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-const MODES: InputMode[] = ["auto", "kakeibo", "pet", "log"];
+const MODES: InputMode[] = ["auto", "kakeibo", "medical", "juku", "pet", "log"];
 
 export async function POST(req: NextRequest) {
   try {

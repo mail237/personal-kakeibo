@@ -56,12 +56,18 @@ function modeInstruction(mode: InputMode): string {
 - pet: 動物病院・ワクチン・フード・しつけ・体調などペット関連
 - log: 作業時間・習慣・日記・TODO 完了など行動・ログ系`;
   }
-  const map: Record<Exclude<InputMode, "auto">, SheetCategory> = {
+  if (mode === "medical") {
+    return `ユーザーは手動で「医療」を選びました。必ず category は "kakeibo" にし、fields.category は必ず "医療" に固定してください。summary は先頭に [医療] を付けてください。`;
+  }
+  if (mode === "juku") {
+    return `ユーザーは手動で「塾関係」を選びました。必ず category は "kakeibo" にし、fields.category は必ず "塾関係" に固定してください。summary は先頭に [塾関係] を付けてください。`;
+  }
+  const map: Record<Exclude<InputMode, "auto" | "medical" | "juku">, SheetCategory> = {
     kakeibo: "kakeibo",
     pet: "pet",
     log: "log",
   };
-  const labels: Record<Exclude<InputMode, "auto">, string> = {
+  const labels: Record<Exclude<InputMode, "auto" | "medical" | "juku">, string> = {
     kakeibo: "家計簿",
     pet: "ペット記録",
     log: "行動ログ",

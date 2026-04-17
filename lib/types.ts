@@ -1,4 +1,10 @@
-export type InputMode = "auto" | "kakeibo" | "pet" | "log";
+export type InputMode =
+  | "auto"
+  | "kakeibo"
+  | "medical"
+  | "juku"
+  | "pet"
+  | "log";
 
 export type SheetCategory = "kakeibo" | "pet" | "log";
 
