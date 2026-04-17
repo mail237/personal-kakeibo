@@ -18,6 +18,16 @@ function categoryLabel(c: AnalysisResult["category"]): string {
   return "行動ログ";
 }
 
+/** プレビュー用：家計簿でも詳細カテゴリ（塾関係・医療など）をバッジに出す */
+function previewBadgeLabel(a: AnalysisResult): string {
+  if (a.category === "kakeibo") {
+    const sub = a.fields?.category;
+    if (typeof sub === "string" && sub.trim()) return sub.trim();
+    return "家計簿";
+  }
+  return categoryLabel(a.category);
+}
+
 export default function RecordApp() {
   const [mode, setMode] = useState<InputMode>("auto");
   const [text, setText] = useState("");
@@ -161,7 +171,7 @@ export default function RecordApp() {
         <section className="space-y-3 rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4">
           <div className="flex flex-wrap items-center gap-2">
             <span className="rounded-full bg-white px-2.5 py-0.5 text-xs font-semibold text-emerald-800 ring-1 ring-emerald-200">
-              {categoryLabel(preview.category)}
+              {previewBadgeLabel(preview)}
             </span>
             <span className="text-xs text-zinc-500">{preview.date}</span>
           </div>
