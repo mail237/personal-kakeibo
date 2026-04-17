@@ -94,6 +94,9 @@ fields のルール:
 - category が pet のとき: { "content": "内容", "hospital": "病院名（なければ空文字）", "cost": 数値（円、不明なら0）, "nextDue": "次回予定（なければ空文字）" }
 - category が log のとき: { "time": "HH:mm または空", "content": "内容", "tags": "カンマ区切りタグ" }
 
+家計簿カテゴリの補足ルール:
+- 書籍 / 本 / 参考書 / 問題集 / 教材 / 学習アプリなど「勉強に使う購入」は、原則 category を "塾関係" にしてください。
+
 ユーザーのテキスト:
 ${userText}
 `;
@@ -145,6 +148,35 @@ function normalizeResult(raw: unknown): AnalysisResult {
   };
 }
 
+function ensurePrefix(summary: string, prefix: string): string {
+  const s = summary.trim();
+  if (!s) return prefix;
+  if (s.startsWith(prefix)) return s;
+  // すでに [xxx] が付いている場合は置換せず追記（見た目優先）
+  if (/^\[[^\]]+\]/.test(s)) return `${prefix} ${s}`;
+  return `${prefix} ${s}`;
+}
+
+function applyModeOverrides(mode: InputMode, r: AnalysisResult): AnalysisResult {
+  if (mode === "medical") {
+    return {
+      ...r,
+      category: "kakeibo",
+      fields: { ...r.fields, category: "医療" },
+      summary: ensurePrefix(r.summary, "[医療]"),
+    };
+  }
+  if (mode === "juku") {
+    return {
+      ...r,
+      category: "kakeibo",
+      fields: { ...r.fields, category: "塾関係" },
+      summary: ensurePrefix(r.summary, "[塾関係]"),
+    };
+  }
+  return r;
+}
+
 export async function analyzeText(
   mode: InputMode,
   text: string
@@ -166,7 +198,7 @@ export async function analyzeText(
     const response = result.response;
     const out = response.text();
     const parsed = parseModelJsonText(out);
-    return normalizeResult(parsed);
+    return applyModeOverrides(mode, normalizeResult(parsed));
   });
 }
 
@@ -201,6 +233,6 @@ export async function analyzeImage(
     ]);
     const out = result.response.text();
     const parsed = parseModelJsonText(out);
-    return normalizeResult(parsed);
+    return applyModeOverrides(mode, normalizeResult(parsed));
   });
 }
