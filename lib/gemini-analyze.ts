@@ -77,13 +77,14 @@ function buildPrompt(mode: InputMode, userText: string): string {
   "category": "kakeibo" | "pet" | "log",
   "date": "YYYY-MM-DD（不明なら今日の日付を推定。日本時間基準）",
   "fields": { ... },
-  "summary": "一行の日本語サマリー"
+  "summary": "一行の日本語サマリー（できれば先頭にカテゴリを角括弧で付ける。例: [医療] 内科 1200円）"
 }
 
 ${modeInstruction(mode)}
 
 fields のルール:
-- category が kakeibo のとき: { "shubetsu": "支出|収入|その他", "amount": 数値（円、不明なら0）, "category": "食費|交通費|医療|ペット費|その他 など", "memo": "補足" }
+- category が kakeibo のとき:
+  { "shubetsu": "支出|収入|その他", "amount": 数値（円、不明なら0）, "category": "食費|交通費|医療|塾関係|ペット費|日用品|通信|光熱費|住居|交際|娯楽|その他", "memo": "補足" }
 - category が pet のとき: { "content": "内容", "hospital": "病院名（なければ空文字）", "cost": 数値（円、不明なら0）, "nextDue": "次回予定（なければ空文字）" }
 - category が log のとき: { "time": "HH:mm または空", "content": "内容", "tags": "カンマ区切りタグ" }
 
@@ -104,7 +105,7 @@ ${hintBlock}
   "category": "kakeibo" | "pet" | "log",
   "date": "YYYY-MM-DD",
   "fields": { ... },
-  "summary": "一行の日本語サマリー"
+  "summary": "一行の日本語サマリー（できれば先頭にカテゴリを角括弧で付ける。例: [塾関係] 月謝 12000円）"
 }
 
 ${modeInstruction(mode)}

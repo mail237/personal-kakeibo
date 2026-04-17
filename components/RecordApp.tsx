@@ -10,6 +10,21 @@ const TABS: { mode: InputMode; label: string }[] = [
   { mode: "log", label: "行動ログ" },
 ];
 
+const KAKEIBO_CATEGORIES = [
+  "食費",
+  "交通費",
+  "医療",
+  "塾関係",
+  "ペット費",
+  "日用品",
+  "通信",
+  "光熱費",
+  "住居",
+  "交際",
+  "娯楽",
+  "その他",
+] as const;
+
 function categoryLabel(c: AnalysisResult["category"]): string {
   if (c === "kakeibo") return "家計簿";
   if (c === "pet") return "ペット記録";
@@ -18,6 +33,7 @@ function categoryLabel(c: AnalysisResult["category"]): string {
 
 export default function RecordApp() {
   const [mode, setMode] = useState<InputMode>("auto");
+  const [kakeiboCategory, setKakeiboCategory] = useState<string>("");
   const [text, setText] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<AnalysisResult | null>(null);
@@ -49,9 +65,13 @@ export default function RecordApp() {
     }
     setBusy("analyze");
     try {
+      const hint =
+        mode === "kakeibo" && kakeiboCategory
+          ? `希望カテゴリ: ${kakeiboCategory}\n`
+          : "";
       const fd = new FormData();
       fd.set("mode", mode);
-      fd.set("text", text);
+      fd.set("text", hint + text);
       if (file) fd.set("image", file);
       const res = await fetch("/api/analyze", { method: "POST", body: fd });
       const data = await res.json();
@@ -107,7 +127,10 @@ export default function RecordApp() {
             <button
               key={t.mode}
               type="button"
-              onClick={() => setMode(t.mode)}
+              onClick={() => {
+                setMode(t.mode);
+                if (t.mode !== "kakeibo") setKakeiboCategory("");
+              }}
               className={`rounded-xl border px-3 py-2.5 text-sm font-medium transition ${
                 mode === t.mode
                   ? "border-emerald-600 bg-emerald-50 text-emerald-900"
@@ -118,6 +141,40 @@ export default function RecordApp() {
             </button>
           ))}
         </div>
+        {mode === "kakeibo" && (
+          <div className="space-y-2">
+            <p className="text-xs font-medium uppercase tracking-wide text-zinc-400">
+              家計簿カテゴリ（任意）
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setKakeiboCategory("")}
+                className={`rounded-full border px-3 py-1.5 text-xs font-medium ${
+                  !kakeiboCategory
+                    ? "border-emerald-600 bg-emerald-50 text-emerald-900"
+                    : "border-zinc-200 bg-white text-zinc-700"
+                }`}
+              >
+                指定なし
+              </button>
+              {KAKEIBO_CATEGORIES.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => setKakeiboCategory(c)}
+                  className={`rounded-full border px-3 py-1.5 text-xs font-medium ${
+                    kakeiboCategory === c
+                      ? "border-emerald-600 bg-emerald-50 text-emerald-900"
+                      : "border-zinc-200 bg-white text-zinc-700"
+                  }`}
+                >
+                  {c}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </section>
 
       <section className="space-y-3 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
@@ -126,7 +183,7 @@ export default function RecordApp() {
         </label>
         <textarea
           className="min-h-[120px] w-full resize-y rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm outline-none ring-emerald-500 focus:border-emerald-500 focus:ring-2"
-          placeholder="例：コンビニでおにぎりとコーヒー 580円"
+          placeholder="例：塾の月謝 12000円 / 病院 3000円 / コンビニ 580円"
           value={text}
           onChange={(e) => setText(e.target.value)}
         />
