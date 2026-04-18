@@ -29,10 +29,15 @@ cd "${ROOT_DIR}/gas"
 echo "==> clasp version（スナップショット）※ ウェブアプリに載せる版を固定する"
 npx clasp version "auto $(date -Iseconds)"
 
+LATEST_VER="$(npx clasp versions 2>/dev/null | tail -1 | awk -F' - ' '{print $1}')"
 echo ""
 echo "==> あと 1 手（Google の制約で CLI からは安全にできません）"
-echo "    左の一覧で「種類: ウェブアプリ」の行を選ぶ（ライブラリだけの行は違う）"
-echo "    鉛筆 →「バージョン」でいちばん数字の大きい最新版を選ぶ →「デプロイ」"
+if [[ -f "${ROOT_DIR}/gas/WEBAPP_DEPLOYMENT_ID" ]]; then
+  echo "    gas/WEBAPP_DEPLOYMENT_ID と同じデプロイ ID の行＝ウェブアプリ（先頭 $(tr -d '\n' <"${ROOT_DIR}/gas/WEBAPP_DEPLOYMENT_ID" | head -c 20)…）"
+else
+  echo "    左の一覧で「ウェブアプリ」の行を選ぶ（ライブラリだけの行は違う）"
+fi
+echo "    鉛筆 → バージョン ${LATEST_VER:-?} → デプロイ"
 echo ""
 
 DEPLOY_UI="https://script.google.com/home/projects/${GAS_SCRIPT_ID}/deployments"
@@ -42,6 +47,10 @@ elif command -v xdg-open >/dev/null 2>&1; then
   xdg-open "${DEPLOY_UI}"
 else
   echo "    デプロイ管理: ${DEPLOY_UI}"
+fi
+
+if [[ "$(uname -s)" == "Darwin" ]] && command -v osascript >/dev/null 2>&1 && [[ -n "${LATEST_VER:-}" ]]; then
+  osascript -e "display dialog \"ウェブアプリの行（ライブラリ専用ではない）を選び、鉛筆 → バージョン ${LATEST_VER} → デプロイ\" with title \"personal-kakeibo GAS\" buttons {\"OK\"} default button 1" 2>/dev/null || true
 fi
 
 echo ""
