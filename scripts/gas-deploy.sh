@@ -31,16 +31,17 @@ npx clasp version "auto $(date -Iseconds)"
 
 echo ""
 echo "==> あと 1 手（Google の制約で CLI からは安全にできません）"
-echo "    右上「デプロイ」→「デプロイを管理」→ ウェブアプリの行の鉛筆"
-echo "    →「バージョン」で今つくった最新版を選ぶ →「デプロイ」"
+echo "    左の一覧で「種類: ウェブアプリ」の行を選ぶ（ライブラリだけの行は違う）"
+echo "    鉛筆 →「バージョン」でいちばん数字の大きい最新版を選ぶ →「デプロイ」"
 echo ""
 
+DEPLOY_UI="https://script.google.com/home/projects/${GAS_SCRIPT_ID}/deployments"
 if command -v open >/dev/null 2>&1; then
-  open "https://script.google.com/home/projects/${GAS_SCRIPT_ID}/edit"
+  open "${DEPLOY_UI}"
 elif command -v xdg-open >/dev/null 2>&1; then
-  xdg-open "https://script.google.com/home/projects/${GAS_SCRIPT_ID}/edit"
+  xdg-open "${DEPLOY_UI}"
 else
-  echo "    エディタ: https://script.google.com/home/projects/${GAS_SCRIPT_ID}/edit"
+  echo "    デプロイ管理: ${DEPLOY_UI}"
 fi
 
 echo ""
