@@ -142,7 +142,7 @@ function buildPrompt(mode: InputMode, userText: string): string {
 
 {
   "category": "kakeibo" | "pet" | "log",
-  "date": "YYYY-MM-DD（不明なら今日の日付を推定。日本時間基準）",
+  "date": "YYYY-MM-DD（ユーザーが日付を書いていない・曖昧なときは必ず今日の日付。日本時間）",
   "fields": { ... },
   "summary": "概要欄用の短い見出しのみ（例: [飲食] または [交通費]。長文・店名・レシートの詳細は書かない）"
 }
@@ -176,7 +176,7 @@ ${hintBlock}
 
 {
   "category": "kakeibo" | "pet" | "log",
-  "date": "YYYY-MM-DD",
+  "date": "YYYY-MM-DD（入力に日付がない場合は今日・日本時間）",
   "fields": { ... },
   "summary": "概要欄用の短い見出しのみ（例: [飲食]）。詳細は fields.bikou（家計簿）または各カテゴリの content などへ"
 }
@@ -385,9 +385,9 @@ function normalizeResult(raw: unknown, mode: InputMode): AnalysisResult {
   if (cat !== "kakeibo" && cat !== "pet" && cat !== "log") {
     throw new Error(`category が不正です: ${String(cat)}`);
   }
-  const date = typeof o.date === "string" ? o.date : "";
+  let date = typeof o.date === "string" ? o.date.trim() : "";
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-    throw new Error(`date が YYYY-MM-DD 形式ではありません: ${String(o.date)}`);
+    date = extractDateYmdLoose(o) ?? jstYmdTokyo();
   }
   const fields = o.fields;
   if (!fields || typeof fields !== "object" || Array.isArray(fields)) {

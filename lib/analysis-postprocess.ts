@@ -1,5 +1,22 @@
 import type { AnalysisResult } from "./types";
 
+/** 日本時間の今日 YYYY-MM-DD */
+function jstYmdToday(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Tokyo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+/** 日付が無い・形式が違うときは当日（サーバー処理日・日本時間基準） */
+function ensureAnalysisDate(r: AnalysisResult): AnalysisResult {
+  const d = String(r.date ?? "").trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(d)) return r;
+  return { ...r, date: jstYmdToday() };
+}
+
 /** 全角数字 → 半角（１５８０ → 1580） */
 function normalizeFullWidthDigits(text: string): string {
   return text.replace(/[\uFF10-\uFF19]/g, (ch) =>
@@ -220,7 +237,8 @@ function compressKakeiboBikouField(r: AnalysisResult): AnalysisResult {
  * 備考はレシートの羅列を短くする（金額拾いのあと）。
  */
 export function postprocessKakeiboForSave(r: AnalysisResult): AnalysisResult {
-  const afterPet = fillPetCostIfMissing(r);
+  const withDate = ensureAnalysisDate(r);
+  const afterPet = fillPetCostIfMissing(withDate);
   const afterAmount1 = fillKakeiboAmountIfMissing(afterPet);
   const afterSummary = normalizeKakeiboShortSummary(afterAmount1);
   const afterAmount2 = fillKakeiboAmountIfMissing(afterSummary);
