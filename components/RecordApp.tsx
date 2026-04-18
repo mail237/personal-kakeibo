@@ -54,8 +54,10 @@ export default function RecordApp() {
   const [entries, setEntries] = useState<RecentEntry[]>([]);
   const [recordsError, setRecordsError] = useState<string | null>(null);
   const [recordsEmptyHint, setRecordsEmptyHint] = useState<string | null>(null);
+  const [recordsBusy, setRecordsBusy] = useState(false);
 
   const loadRecords = useCallback(async () => {
+    setRecordsBusy(true);
     try {
       const res = await fetch(`/api/records?_=${Date.now()}`, {
         cache: "no-store",
@@ -90,6 +92,8 @@ export default function RecordApp() {
       setRecordsError(
         e instanceof Error ? e.message : "直近の記録の取得に失敗しました。"
       );
+    } finally {
+      setRecordsBusy(false);
     }
   }, []);
 
@@ -266,16 +270,20 @@ export default function RecordApp() {
       )}
 
       <section className="space-y-3">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <h2 className="text-sm font-semibold text-zinc-800">直近の記録</h2>
           <button
             type="button"
             onClick={() => void loadRecords()}
-            className="text-xs text-emerald-700 hover:underline"
+            disabled={recordsBusy}
+            className="shrink-0 rounded-lg border border-emerald-600 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-900 shadow-sm hover:bg-emerald-100 disabled:opacity-50"
           >
-            更新
+            {recordsBusy ? "取得中…" : "一覧を更新"}
           </button>
         </div>
+        <p className="text-xs text-zinc-500">
+          一覧は画面の一番下です。入力欄や「AI で解析」の下までスクロールしてください。
+        </p>
         {recordsError && (
           <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
             直近の記録: {recordsError}
