@@ -17,6 +17,39 @@ function ensureAnalysisDate(r: AnalysisResult): AnalysisResult {
   return { ...r, date: jstYmdToday() };
 }
 
+/** summary・fields に「その日付」が書かれていないのに date だけ変な年になるのを防ぐ */
+function textSuggestsCalendarOrRelativeDate(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  if (/\d{4}\s*[-／/]\s*\d{1,2}\s*[-／/]\s*\d{1,2}/.test(t)) return true;
+  if (/\d{4}年\s*\d{1,2}月\s*\d{1,2}日/.test(t)) return true;
+  if (/\d{1,2}\s*月\s*\d{1,2}\s*日/.test(t)) return true;
+  if (/(?:^|[^\d/])(\d{1,2})\/(\d{1,2})(?:[^\d]|$)/.test(t)) return true;
+  if (/今日|本日|昨日|一昨日|明日|先日|先週|今週|来週|あさって|おととい/.test(t)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * 行動ログ: モデルが date だけに迷走日付を入れ、本文に根拠が無いときは当日にする。
+ * （家計簿はレシートの日付が summary/備考に出ないことがあり、このロジックを掛けると壊れる）
+ */
+function useTodayUnlessDateAppearsInText(r: AnalysisResult): AnalysisResult {
+  if (r.category !== "log") return r;
+  const bucket = [
+    r.summary,
+    ...Object.values(r.fields).map((v) => (v == null ? "" : String(v))),
+  ].join("\n");
+  const d = String(r.date ?? "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) {
+    return { ...r, date: jstYmdToday() };
+  }
+  if (bucket.includes(d)) return r;
+  if (textSuggestsCalendarOrRelativeDate(bucket)) return r;
+  return { ...r, date: jstYmdToday() };
+}
+
 /** 全角数字 → 半角（１５８０ → 1580） */
 function normalizeFullWidthDigits(text: string): string {
   return text.replace(/[\uFF10-\uFF19]/g, (ch) =>
@@ -237,7 +270,7 @@ function compressKakeiboBikouField(r: AnalysisResult): AnalysisResult {
  * 備考はレシートの羅列を短くする（金額拾いのあと）。
  */
 export function postprocessKakeiboForSave(r: AnalysisResult): AnalysisResult {
-  const withDate = ensureAnalysisDate(r);
+  const withDate = useTodayUnlessDateAppearsInText(ensureAnalysisDate(r));
   const afterPet = fillPetCostIfMissing(withDate);
   const afterAmount1 = fillKakeiboAmountIfMissing(afterPet);
   const afterSummary = normalizeKakeiboShortSummary(afterAmount1);
