@@ -157,6 +157,7 @@ fields のルール:
 
 家計簿カテゴリの補足ルール:
 - 書籍 / 本 / 参考書 / 問題集 / 教材 / 学習アプリなど「勉強に使う購入」は、原則 category を "塾関係" にしてください。
+- 動物病院の請求書で total_amount や「お支払額」がある場合は、小計や明細合計ではなくその実負担額を fields.amount に入れる。
 - summary は短い見出しだけ。bikou は店名・用途を1〜2文で（レシートを貼り付けない）。金額は必ず fields.amount（円）に入れる。
 - store_name / items / total だけの別形式に置き換えないでください。必ず category・date・fields・summary をトップレベルに含めてください。
 
@@ -184,7 +185,7 @@ ${modeInstruction(mode)}
 
 fields のルールはテキスト解析と同じです（kakeibo / pet / log それぞれ）。
 レシートなら通常 kakeibo。動物病院なら pet。
-kakeibo では金額は fields.amount に数値（円）を入れる。fields.bikou は店名＋簡単なメモ程度（レシートの行ごとの羅列は禁止）。
+kakeibo では金額は fields.amount に数値（円）を入れる。請求書・領収書に total_amount や保険控除後の支払額があるときはそれを優先（小計だけにしない）。fields.bikou は店名＋簡単なメモ程度（レシートの行ごとの羅列は禁止）。
 行動ログでは fields.time をスプレッドシートの「時間」列にそのまま保存する（例 10:00〜11:00）。詳細は fields.content / tags に。
 
 重要: store_name / items / total だけの別形式の JSON に置き換えないでください。必ず上記の category・date・fields・summary をトップレベルに含めてください（レシートでも同じ）。`;
@@ -233,29 +234,63 @@ function extractDateYmdLoose(o: Record<string, unknown>): string | null {
   return null;
 }
 
+/** レシート・請求書 JSON の数値（文字列のカンマ付きも可） */
+function receiptLikeNumber(v: unknown): number | null {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string") {
+    const n = Number(v.replace(/,/g, "").trim());
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
+}
+
+/**
+ * 支払額を推定。請求書は total_amount（保険控除後の支払額）を最優先し、
+ * subtotal だけだと動物病院などで実負担とズレるため total のあとに回す。
+ */
 function pickReceiptTotal(o: Record<string, unknown>): number {
-  if (typeof o.total === "number" && Number.isFinite(o.total) && o.total > 0) {
-    return o.total;
+  const paymentKeys = [
+    "total_amount",
+    "grand_total",
+    "payment_total",
+    "amount_due",
+    "balance_due",
+    "total",
+  ];
+  for (const k of paymentKeys) {
+    const n = receiptLikeNumber(o[k]);
+    if (n != null && n !== 0) return Math.abs(n);
   }
-  if (typeof o.subtotal === "number" && Number.isFinite(o.subtotal) && o.subtotal > 0) {
-    return o.subtotal;
-  }
+  const sub = receiptLikeNumber(o.subtotal);
+  if (sub != null && sub > 0) return sub;
+
   const items = Array.isArray(o.items) ? o.items : [];
   let sum = 0;
   for (const it of items) {
     if (!it || typeof it !== "object") continue;
     const row = it as Record<string, unknown>;
-    const price = typeof row.price === "number" ? row.price : 0;
+    const lineTotal = receiptLikeNumber(row.amount);
+    if (lineTotal != null && lineTotal > 0) {
+      sum += lineTotal;
+      continue;
+    }
+    const unit =
+      receiptLikeNumber(row.price) ??
+      receiptLikeNumber(row.unit_price) ??
+      receiptLikeNumber(row.unitPrice);
+    const qtyRaw = receiptLikeNumber(row.quantity);
     const qty =
-      typeof row.quantity === "number" && row.quantity > 0 ? row.quantity : 1;
-    if (Number.isFinite(price)) sum += price * qty;
+      qtyRaw != null && qtyRaw > 0 ? qtyRaw : 1;
+    if (unit != null && Number.isFinite(unit)) sum += unit * qty;
   }
   return sum > 0 ? sum : 0;
 }
 
 function buildBikouFromReceiptLike(o: Record<string, unknown>): string {
   const lines: string[] = [];
-  const store = String(o.store_name ?? o.store ?? "").trim();
+  const store = String(
+    o.store_name ?? o.store ?? o.clinic_name ?? o.vendor_name ?? ""
+  ).trim();
   if (store) lines.push(store);
   const items = Array.isArray(o.items) ? o.items : [];
   for (const it of items) {
@@ -263,11 +298,14 @@ function buildBikouFromReceiptLike(o: Record<string, unknown>): string {
     const row = it as Record<string, unknown>;
     const name = String(row.name ?? "").trim();
     const qty = row.quantity;
-    const price = row.price;
+    const price =
+      receiptLikeNumber(row.price) ??
+      receiptLikeNumber(row.unit_price) ??
+      receiptLikeNumber(row.amount);
     const parts: string[] = [];
     if (name) parts.push(name);
     if (typeof qty === "number") parts.push(`×${qty}`);
-    if (typeof price === "number") parts.push(`${price}円`);
+    if (price != null) parts.push(`${price}円`);
     const line = parts.join(" ");
     if (line) lines.push(line);
   }
@@ -302,6 +340,9 @@ function tryCoerceReceiptLikeSchema(
   const looksReceipt =
     o.store_name != null ||
     o.store != null ||
+    o.clinic_name != null ||
+    o.vendor_name != null ||
+    o.total_amount != null ||
     (Array.isArray(o.items) && o.items.length > 0) ||
     typeof o.total === "number" ||
     typeof o.subtotal === "number";
@@ -311,16 +352,23 @@ function tryCoerceReceiptLikeSchema(
   const bikou = buildBikouFromReceiptLike(o);
   const date = extractDateYmdLoose(o) ?? jstYmdTokyo();
 
+  const vetLike =
+    String(o.clinic_name ?? "").trim() !== "" ||
+    String(o.pet_name ?? "").trim() !== "" ||
+    String(o.veterinarian ?? "").trim() !== "";
+  const kakeiboCategory = vetLike ? "ペット費" : "飲食";
+  const summaryTag = vetLike ? "[ペット費]" : "[飲食]";
+
   return {
     category: "kakeibo",
     date,
     fields: {
       shubetsu: "支出",
       amount: amount > 0 ? amount : 0,
-      category: "飲食",
+      category: kakeiboCategory,
       bikou,
     },
-    summary: "[飲食]",
+    summary: summaryTag,
   };
 }
 
