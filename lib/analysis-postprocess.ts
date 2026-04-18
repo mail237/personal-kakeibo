@@ -60,6 +60,37 @@ function extractYenFromJapaneseText(text: string): number | null {
   return null;
 }
 
+/** ペット記録は GAS が fields.cost のみ参照するため、未設定時は本文から拾う */
+function fillPetCostIfMissing(r: AnalysisResult): AnalysisResult {
+  if (r.category !== "pet") return r;
+  const raw = r.fields.cost;
+  const n =
+    typeof raw === "number"
+      ? raw
+      : Number(String(raw ?? "").replace(/,/g, ""));
+  if (Number.isFinite(n) && n > 0) return r;
+  const amtMisplaced = r.fields.amount;
+  const fromAmount =
+    typeof amtMisplaced === "number"
+      ? amtMisplaced
+      : Number(String(amtMisplaced ?? "").replace(/,/g, ""));
+  if (Number.isFinite(fromAmount) && fromAmount > 0) {
+    return {
+      ...r,
+      fields: { ...r.fields, cost: fromAmount },
+    };
+  }
+  const content = String(r.fields.content ?? "");
+  const hospital = String(r.fields.hospital ?? "");
+  const bucket = [r.summary, content, hospital].join("\n");
+  const from = extractYenFromJapaneseText(bucket);
+  if (from == null) return r;
+  return {
+    ...r,
+    fields: { ...r.fields, cost: from },
+  };
+}
+
 function fillKakeiboAmountIfMissing(r: AnalysisResult): AnalysisResult {
   if (r.category !== "kakeibo") return r;
   const raw = r.fields.amount;
@@ -189,7 +220,8 @@ function compressKakeiboBikouField(r: AnalysisResult): AnalysisResult {
  * 備考はレシートの羅列を短くする（金額拾いのあと）。
  */
 export function postprocessKakeiboForSave(r: AnalysisResult): AnalysisResult {
-  const afterAmount1 = fillKakeiboAmountIfMissing(r);
+  const afterPet = fillPetCostIfMissing(r);
+  const afterAmount1 = fillKakeiboAmountIfMissing(afterPet);
   const afterSummary = normalizeKakeiboShortSummary(afterAmount1);
   const afterAmount2 = fillKakeiboAmountIfMissing(afterSummary);
   return compressKakeiboBikouField(afterAmount2);

@@ -279,7 +279,23 @@ function amountFromAnalysis_(analysis) {
       mustString_(f.memo);
     return extractYenFromSummary_(combined);
   }
-  if (analysis.category === "pet") return asNumber_(f.cost);
+  if (analysis.category === "pet") {
+    var cPet = asNumber_(f.cost);
+    if (cPet > 0) return cPet;
+    var aPet = asNumber_(f.amount);
+    if (aPet > 0) return aPet;
+    var petText =
+      mustString_(analysis.summary) +
+      " " +
+      mustString_(f.content) +
+      " " +
+      mustString_(f.hospital) +
+      " " +
+      mustString_(f.bikou) +
+      " " +
+      mustString_(f.memo);
+    return extractYenFromSummary_(petText);
+  }
   return 0;
 }
 
