@@ -123,6 +123,44 @@ function extractYenFromSummary_(text) {
   return best > 0 ? best : 0;
 }
 
+function shouldCompressBikouForSheet_(b) {
+  if (!b) return false;
+  var s = String(b);
+  if (/円皿|小計|合計\s*[:：]|外税|伝票|テーブル|登録番号|合計点数/.test(s)) return true;
+  var lines = s.split(/\r?\n/).filter(function (l) {
+    return l.trim();
+  });
+  return s.length > 220 || lines.length > 6;
+}
+
+/** レシート羅列の備考を店名付近だけに短縮（Next と同趣旨） */
+function compressKakeiboBikouForSheet_(bikou) {
+  var lines = String(bikou)
+    .split(/\r?\n/)
+    .map(function (l) {
+      return l.trim();
+    })
+    .filter(function (x) {
+      return x;
+    });
+  var skipLine =
+    /^\d+\s*円皿|^[（(]?\d+%|小計|合計|外税|内税|伝票|テーブル|登録番号|軽減税率|合計点数|電子マネー|おつり|現金|クレジット|ポイント|^O\d|扱|消費税等|会計|^\(\d+%|\d+\s*[×x]\s*\d+\s*=\s*[\d,，]+\s*円/i;
+  var looksAddr = /[市区町村]|丁目|番地|号|〒|地下街|^\d+-\d+-\d+|県$/;
+  var kept = [];
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+    if (skipLine.test(line)) continue;
+    if (looksAddr.test(line)) continue;
+    if (/^[\d,，\s円×=xX（）()%-]+$/i.test(line)) continue;
+    kept.push(line);
+    if (kept.length >= 2) break;
+  }
+  var out = kept.join(" ").replace(/\s+/g, " ").trim();
+  if (!out) out = lines[0] ? lines[0].slice(0, 100) : "";
+  if (out.length > 120) out = out.slice(0, 117) + "…";
+  return out;
+}
+
 /** 家計簿: 概要を [タグ] のみにし詳細を備考へ。金額は最後に summary+備考から再抽出（Next 側が古くても効く） */
 function normalizeKakeiboRowForSheet_(analysis) {
   var sum = normalizeFwBrackets_(mustString_(analysis.summary));
@@ -139,6 +177,9 @@ function normalizeKakeiboRowForSheet_(analysis) {
   }
   if (amt <= 0) {
     amt = extractYenFromSummary_(sum + " " + bikou);
+  }
+  if (shouldCompressBikouForSheet_(bikou)) {
+    bikou = compressKakeiboBikouForSheet_(bikou);
   }
   return { summary: sum, amount: amt, bikou: bikou };
 }

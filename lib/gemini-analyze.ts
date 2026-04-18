@@ -151,13 +151,13 @@ ${modeInstruction(mode)}
 
 fields のルール:
 - category が kakeibo のとき:
-  { "shubetsu": "支出|収入|その他", "amount": 数値（円、不明なら0）, "category": "飲食|食費|交通費|医療|塾関係|ペット費|日用品|通信|光熱費|住居|交際|娯楽|その他", "bikou": "備考（店名・品目・状況などの詳細。なければ空文字）" }
+  { "shubetsu": "支出|収入|その他", "amount": 数値（円、不明なら0）, "category": "飲食|食費|交通費|医療|塾関係|ペット費|日用品|通信|光熱費|住居|交際|娯楽|その他", "bikou": "備考は短く（店名＋一言でよい。レシートの住所・皿別明細・税の内訳・伝票番号などの全文は書かない）" }
 - category が pet のとき: { "content": "内容（詳細）", "hospital": "病院名（なければ空文字）", "cost": 数値（円、不明なら0）, "nextDue": "次回予定（なければ空文字）" } ／ summary は短く（例: [ペット]）でよい
 - category が log のとき: { "time": "時間帯（スプレッドシートのC列。例 10:00〜11:00 または 10:28。空なら可）", "content": "詳細・場所（D列の備考）", "tags": "カンマ区切りタグ（D列に続けて書く）" } ／ summary は短い見出しのみ（例: 散歩、勉強）。time の内容は content に繰り返さない
 
 家計簿カテゴリの補足ルール:
 - 書籍 / 本 / 参考書 / 問題集 / 教材 / 学習アプリなど「勉強に使う購入」は、原則 category を "塾関係" にしてください。
-- summary は短い見出しだけ。bikou に詳細を書く。金額は必ず fields.amount（円）に入れる（summary には金額を書かなくてよい）。
+- summary は短い見出しだけ。bikou は店名・用途を1〜2文で（レシートを貼り付けない）。金額は必ず fields.amount（円）に入れる。
 - store_name / items / total だけの別形式に置き換えないでください。必ず category・date・fields・summary をトップレベルに含めてください。
 
 ユーザーのテキスト:
@@ -184,7 +184,7 @@ ${modeInstruction(mode)}
 
 fields のルールはテキスト解析と同じです（kakeibo / pet / log それぞれ）。
 レシートなら通常 kakeibo。動物病院なら pet。
-kakeibo では金額は fields.amount に数値（円）を入れる。店名・品目などの詳細は fields.bikou に書く。
+kakeibo では金額は fields.amount に数値（円）を入れる。fields.bikou は店名＋簡単なメモ程度（レシートの行ごとの羅列は禁止）。
 行動ログでは fields.time をスプレッドシートの「時間」列にそのまま保存する（例 10:00〜11:00）。詳細は fields.content / tags に。
 
 重要: store_name / items / total だけの別形式の JSON に置き換えないでください。必ず上記の category・date・fields・summary をトップレベルに含めてください（レシートでも同じ）。`;

@@ -127,12 +127,60 @@ function normalizeKakeiboShortSummary(r: AnalysisResult): AnalysisResult {
   };
 }
 
+/** レシート全文のような備考を、店名・要点だけに短くする */
+function compressKakeiboBikou(bikou: string): string {
+  const lines = bikou
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const skipLine =
+    /^\d+\s*円皿|^[（(]?\d+%|小計|合計|外税|内税|伝票|テーブル|登録番号|軽減税率|合計点数|電子マネー|おつり|現金|クレジット|ポイント|^O\d|扱|消費税等|会計|^\(\d+%|\d+\s*[×x]\s*\d+\s*=\s*[\d,，]+\s*円/i;
+  const looksLikeAddress =
+    /[市区町村]|丁目|番地|号|〒|地下街|^\d+-\d+-\d+|県$/;
+  const kept: string[] = [];
+  for (const line of lines) {
+    if (skipLine.test(line)) continue;
+    if (looksLikeAddress.test(line)) continue;
+    if (/^[\d,，\s円×=xX（）()%-]+$/i.test(line)) continue;
+    kept.push(line);
+    if (kept.length >= 2) break;
+  }
+  let out = kept.join(" ").replace(/\s+/g, " ").trim();
+  if (!out) {
+    out = (lines[0] ?? "").slice(0, 100);
+  }
+  if (out.length > 120) {
+    out = `${out.slice(0, 117)}…`;
+  }
+  return out;
+}
+
+function shouldCompressKakeiboBikou(b: string): boolean {
+  if (/円皿|小計|合計\s*[:：]|外税|伝票|テーブル|登録番号|合計点数/.test(b)) {
+    return true;
+  }
+  const lines = b.split(/\r?\n/).filter((l) => l.trim());
+  return b.length > 220 || lines.length > 6;
+}
+
+function compressKakeiboBikouField(r: AnalysisResult): AnalysisResult {
+  if (r.category !== "kakeibo") return r;
+  const b = String(r.fields.bikou ?? "").trim();
+  if (!b || !shouldCompressKakeiboBikou(b)) return r;
+  return {
+    ...r,
+    fields: { ...r.fields, bikou: compressKakeiboBikou(b) },
+  };
+}
+
 /**
  * 解析直後・保存直前のどちらでも使う。
  * 金額は「概要が長いとき」備考へ移す前に拾い、移した後にもう一度拾う（順序バグ防止）。
+ * 備考はレシートの羅列を短くする（金額拾いのあと）。
  */
 export function postprocessKakeiboForSave(r: AnalysisResult): AnalysisResult {
   const afterAmount1 = fillKakeiboAmountIfMissing(r);
   const afterSummary = normalizeKakeiboShortSummary(afterAmount1);
-  return fillKakeiboAmountIfMissing(afterSummary);
+  const afterAmount2 = fillKakeiboAmountIfMissing(afterSummary);
+  return compressKakeiboBikouField(afterAmount2);
 }
