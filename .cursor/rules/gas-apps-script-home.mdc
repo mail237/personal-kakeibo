@@ -1,0 +1,10 @@
+---
+description: Open Google Apps Script via script.google.com/home (not deep deployment URLs)
+alwaysApply: true
+---
+
+# Google Apps Script を開く URL
+
+- **既定:** ユーザーに Apps Script の画面を開いてもらうときは **`https://script.google.com/home`** を案内する。ログイン後、一覧からプロジェクトを選ばせる。
+- **避ける:** `.../home/projects/{id}/deployments` のような深いリンクは、404 やアカウント不一致になりやすいので、**既定の案内では使わない**。
+- **補足:** エディタ内の **デプロイ → デプロイを管理** は従来どおり。ウェブアプリの **`/exec` URL** は `gas/WEBAPP_DEPLOYMENT_ID` やデプロイ管理のコピー用で別物。
