@@ -16,9 +16,19 @@ function normalizeForYenParse(text: string): string {
     .trim();
 }
 
+/** 請求書 JSON の total_amount（モデルが本文に含めたとき） */
+function extractTotalAmountFromJsonSnippet(text: string): number | null {
+  const m = text.match(/["']?total_amount["']?\s*:\s*(\d+)/);
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 /** summary の「1,580円」「1580円」「合計1,580円」などから円を推定 */
 function extractYenFromJapaneseText(text: string): number | null {
   if (!text) return null;
+  const fromJson = extractTotalAmountFromJsonSnippet(text);
+  if (fromJson != null) return fromJson;
   const raw = normalizeForYenParse(text);
   const compact = raw.replace(/ /g, "");
   const total = /合計\s*[:：]?\s*([\d,]+)\s*円/.exec(compact);

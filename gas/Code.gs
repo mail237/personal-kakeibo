@@ -82,6 +82,12 @@ function normalizeFwBrackets_(s) {
 /** summary の「合計1,580円」「1,580円」から円を拾う（モデルが amount=0 のときの保険） */
 function extractYenFromSummary_(text) {
   if (!text) return 0;
+  /** 請求書 JSON の total_amount（実負担額）。モデルが本文に含めたときの保険 */
+  var jsonTotal = String(text).match(/["']?total_amount["']?\s*:\s*(\d+)/);
+  if (jsonTotal) {
+    var jv = asNumber_(jsonTotal[1]);
+    if (jv > 0) return jv;
+  }
   var s = normalizeFwDigits_(String(text))
     .replace(/\u3000/g, " ")
     .replace(/\uFF0C/g, ",");
@@ -239,17 +245,24 @@ function normalizeCellForCompare_(v) {
   return String(v).trim();
 }
 
-/** 直前のデータ行と同一なら true（1件1行・二重保存防止） */
-function isDuplicateOfLastRow_(sheet, newRow) {
+/** 直近データ行のいずれかと4列とも同一なら true（二重送信・連打対策） */
+function isDuplicateOfRecentRows_(sheet, newRow, maxRows) {
   var lastRow = sheet.getLastRow();
   if (lastRow < 2) return false;
-  var prev = sheet.getRange(lastRow, 1, lastRow, 4).getValues()[0];
-  for (var i = 0; i < 4; i++) {
-    if (normalizeCellForCompare_(prev[i]) !== normalizeCellForCompare_(newRow[i])) {
-      return false;
+  var max = Math.min(maxRows || 5, lastRow - 1);
+  for (var offset = 0; offset < max; offset++) {
+    var r = lastRow - offset;
+    var prev = sheet.getRange(r, 1, r, 4).getValues()[0];
+    var same = true;
+    for (var i = 0; i < 4; i++) {
+      if (normalizeCellForCompare_(prev[i]) !== normalizeCellForCompare_(newRow[i])) {
+        same = false;
+        break;
+      }
     }
+    if (same) return true;
   }
-  return true;
+  return false;
 }
 
 /** 金額列用: カテゴリごとに fields から数値を取る（行動ログは 0） */
@@ -292,41 +305,47 @@ function resolveSheetName_(analysis) {
  */
 function append_(analysis) {
   validateAnalysis_(analysis);
-  const { spreadsheetId } = getProps_();
-  const ss = SpreadsheetApp.openById(spreadsheetId);
-  var sheetName = resolveSheetName_(analysis);
-  const sheet = ss.getSheetByName(sheetName);
-  if (!sheet) throw new Error(`タブ「${sheetName}」が見つかりません`);
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const { spreadsheetId } = getProps_();
+    const ss = SpreadsheetApp.openById(spreadsheetId);
+    var sheetName = resolveSheetName_(analysis);
+    const sheet = ss.getSheetByName(sheetName);
+    if (!sheet) throw new Error(`タブ「${sheetName}」が見つかりません`);
 
-  var row;
-  if (analysis.category === "kakeibo") {
-    var fin = normalizeKakeiboRowForSheet_(analysis);
-    var amtK = fin.amount > 0 ? Number(fin.amount) : 0;
-    row = [analysis.date, briefSummaryForSheet_(fin.summary), amtK, fin.bikou];
-  } else if (analysis.category === "pet") {
-    var amtP = amountFromAnalysis_(analysis);
-    row = [
-      analysis.date,
-      briefSummaryForSheet_(mustString_(analysis.summary)),
-      amtP > 0 ? Number(amtP) : 0,
-      bikouFromAnalysis_(analysis),
-    ];
-  } else if (analysis.category === "log") {
-    row = [
-      analysis.date,
-      briefSummaryForSheet_(mustString_(analysis.summary)),
-      logTimeColumnC_(analysis),
-      logRemarksColumnD_(analysis),
-    ];
-  } else {
-    throw new Error("category が不正です");
-  }
+    var row;
+    if (analysis.category === "kakeibo") {
+      var fin = normalizeKakeiboRowForSheet_(analysis);
+      var amtK = fin.amount > 0 ? Number(fin.amount) : 0;
+      row = [analysis.date, briefSummaryForSheet_(fin.summary), amtK, fin.bikou];
+    } else if (analysis.category === "pet") {
+      var amtP = amountFromAnalysis_(analysis);
+      row = [
+        analysis.date,
+        briefSummaryForSheet_(mustString_(analysis.summary)),
+        amtP > 0 ? Number(amtP) : 0,
+        bikouFromAnalysis_(analysis),
+      ];
+    } else if (analysis.category === "log") {
+      row = [
+        analysis.date,
+        briefSummaryForSheet_(mustString_(analysis.summary)),
+        logTimeColumnC_(analysis),
+        logRemarksColumnD_(analysis),
+      ];
+    } else {
+      throw new Error("category が不正です");
+    }
 
-  if (isDuplicateOfLastRow_(sheet, row)) {
-    return { deduped: true };
+    if (isDuplicateOfRecentRows_(sheet, row, 5)) {
+      return { deduped: true };
+    }
+    sheet.appendRow(row);
+    return { deduped: false };
+  } finally {
+    lock.releaseLock();
   }
-  sheet.appendRow(row);
-  return { deduped: false };
 }
 
 /** 直近一覧用: A列の Date を YYYY-MM-DD に（String(date) だと英語の長文になる） */
