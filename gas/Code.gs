@@ -288,12 +288,27 @@ function append_(analysis) {
   return { deduped: false };
 }
 
+/** 直近一覧用: A列の Date を YYYY-MM-DD に（String(date) だと英語の長文になる） */
+function sheetCellToApiString_(c, colIndex) {
+  if (c == null || c === "") return "";
+  if (colIndex === 0 && Object.prototype.toString.call(c) === "[object Date]") {
+    return Utilities.formatDate(c, "Asia/Tokyo", "yyyy-MM-dd");
+  }
+  if (typeof c === "number") return String(c);
+  return String(c);
+}
+
+/**
+ * @returns {{ entries: Array, missingTabs: Array<string>, headerOnlyTabs: Array<string> }}
+ */
 function recent_(limitPerSheet) {
   const { spreadsheetId } = getProps_();
   const ss = SpreadsheetApp.openById(spreadsheetId);
   const limit = Math.max(1, Math.min(30, Number(limitPerSheet || 6)));
 
   const out = [];
+  const missingTabs = [];
+  const headerOnlyTabs = [];
   const order = [
     { key: "kakeibo", label: "家計簿" },
     { key: "medical", label: "医療" },
@@ -305,10 +320,16 @@ function recent_(limitPerSheet) {
   order.forEach((o) => {
     const sheetName = SHEET_NAMES[o.key];
     const sheet = ss.getSheetByName(sheetName);
-    if (!sheet) return;
+    if (!sheet) {
+      missingTabs.push(sheetName);
+      return;
+    }
 
     const lastRow = sheet.getLastRow();
-    if (lastRow <= 1) return; // ヘッダのみ
+    if (lastRow <= 1) {
+      headerOnlyTabs.push(sheetName);
+      return;
+    }
     const startRow = Math.max(2, lastRow - limit + 1);
     const numRows = lastRow - startRow + 1;
     // A〜D（行動ログのみ C が「時間」。それ以外は C が金額）
@@ -317,7 +338,9 @@ function recent_(limitPerSheet) {
       .slice()
       .reverse()
       .forEach((r) => {
-        const cells = r.map((c) => (c == null ? "" : String(c)));
+        const cells = r.map(function (c, j) {
+          return sheetCellToApiString_(c, j);
+        });
         if (cells.every((c) => c === "")) return;
         out.push({ sheet: o.key, label: o.label, cells: cells });
       });
@@ -326,7 +349,18 @@ function recent_(limitPerSheet) {
   // 日付（cells[0]）で降順
   out.sort((a, b) => String(b.cells[0] || "").localeCompare(String(a.cells[0] || "")));
 
-  return out.slice(0, limit * order.length);
+  return {
+    entries: out.slice(0, limit * order.length),
+    missingTabs: missingTabs,
+    headerOnlyTabs: headerOnlyTabs,
+  };
+}
+
+/** ブラウザで /exec を開いたとき（GET）。本番利用は Next からの POST。 */
+function doGet() {
+  return ContentService.createTextOutput(
+    "personal-kakeibo GAS OK. この URL は POST（JSON）で使います。"
+  ).setMimeType(ContentService.MimeType.PLAIN);
 }
 
 function doPost(e) {
@@ -353,8 +387,13 @@ function doPost(e) {
       return jsonOut_({ ok: true, deduped: ar.deduped === true });
     }
     if (action === "recent") {
-      const entries = recent_(body.limitPerSheet);
-      return jsonOut_({ ok: true, entries: entries });
+      var rr = recent_(body.limitPerSheet);
+      return jsonOut_({
+        ok: true,
+        entries: rr.entries,
+        missingTabs: rr.missingTabs,
+        headerOnlyTabs: rr.headerOnlyTabs,
+      });
     }
     return errorOut_("action が不正です", 400);
   } catch (err) {

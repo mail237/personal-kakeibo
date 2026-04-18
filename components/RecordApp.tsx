@@ -52,15 +52,44 @@ export default function RecordApp() {
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState<"analyze" | "save" | null>(null);
   const [entries, setEntries] = useState<RecentEntry[]>([]);
+  const [recordsError, setRecordsError] = useState<string | null>(null);
+  const [recordsEmptyHint, setRecordsEmptyHint] = useState<string | null>(null);
 
   const loadRecords = useCallback(async () => {
     try {
-      const res = await fetch("/api/records");
+      const res = await fetch(`/api/records?_=${Date.now()}`, {
+        cache: "no-store",
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "取得に失敗しました");
-      setEntries(data.entries ?? []);
-    } catch {
+      setRecordsError(null);
+      const list = (data.entries ?? []) as RecentEntry[];
+      setEntries(list);
+      const missing: string[] = data.missingTabs ?? [];
+      const headerOnly: string[] = data.headerOnlyTabs ?? [];
+      if (list.length === 0) {
+        if (missing.length > 0) {
+          setRecordsEmptyHint(
+            `スプレッドシートに次のタブがありません（名前の完全一致が必要です）: ${missing.join("、")}`
+          );
+        } else if (headerOnly.length > 0) {
+          setRecordsEmptyHint(
+            `次のタブには2行目以降のデータがありません（見出しだけ）: ${headerOnly.join("、")}`
+          );
+        } else {
+          setRecordsEmptyHint(
+            "データ行はありますが、A〜Dがすべて空の行だけの可能性があります。日付・概要などを1列目以降に入れた行があるか確認してください。"
+          );
+        }
+      } else {
+        setRecordsEmptyHint(null);
+      }
+    } catch (e) {
       setEntries([]);
+      setRecordsEmptyHint(null);
+      setRecordsError(
+        e instanceof Error ? e.message : "直近の記録の取得に失敗しました。"
+      );
     }
   }, []);
 
@@ -71,6 +100,8 @@ export default function RecordApp() {
   async function onAnalyze() {
     setError(null);
     setNotice(null);
+    setRecordsError(null);
+    setRecordsEmptyHint(null);
     setPreview(null);
     if (!text.trim() && !file) {
       setError("テキストを入力するか、画像を選んでください。");
@@ -97,6 +128,8 @@ export default function RecordApp() {
     if (!preview) return;
     setError(null);
     setNotice(null);
+    setRecordsError(null);
+    setRecordsEmptyHint(null);
     setBusy("save");
     try {
       const res = await fetch("/api/save", {
@@ -243,8 +276,18 @@ export default function RecordApp() {
             更新
           </button>
         </div>
+        {recordsError && (
+          <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+            直近の記録: {recordsError}
+          </div>
+        )}
+        {recordsEmptyHint && !recordsError && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+            {recordsEmptyHint}
+          </div>
+        )}
         <ul className="space-y-2">
-          {entries.length === 0 && (
+          {entries.length === 0 && !recordsError && (
             <li className="rounded-xl border border-dashed border-zinc-200 px-3 py-6 text-center text-sm text-zinc-400">
               まだ記録がありません
             </li>

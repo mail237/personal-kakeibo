@@ -63,11 +63,28 @@ export async function gasAppend(
   return { deduped: res.deduped === true };
 }
 
-export async function gasRecent(limitPerSheet = 6): Promise<RecentEntry[]> {
-  const res = await gasPost<{ ok: true; entries: RecentEntry[] }>({
+export type GasRecentResult = {
+  entries: RecentEntry[];
+  /** スプレッドシートに存在しなかったタブ名（日本語・完全一致） */
+  missingTabs: string[];
+  /** 1行目だけ（データ行なし）のタブ名 */
+  headerOnlyTabs: string[];
+};
+
+export async function gasRecent(limitPerSheet = 6): Promise<GasRecentResult> {
+  const res = await gasPost<{
+    ok: true;
+    entries: RecentEntry[];
+    missingTabs?: string[];
+    headerOnlyTabs?: string[];
+  }>({
     action: "recent",
     limitPerSheet,
   });
-  return res.entries ?? [];
+  return {
+    entries: res.entries ?? [],
+    missingTabs: res.missingTabs ?? [],
+    headerOnlyTabs: res.headerOnlyTabs ?? [],
+  };
 }
 
