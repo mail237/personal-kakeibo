@@ -8,7 +8,10 @@
     "start": "next start",
     "lint": "next lint",
     "gas:push": "bash scripts/gas-push.sh",
-    "gas:deploy": "bash scripts/gas-deploy.sh"
+    "gas:deploy": "bash scripts/gas-deploy.sh",
+    "gas:verify": "bash scripts/gas-verify.sh",
+    "gas:vercel": "bash scripts/gas-vercel-sync.sh",
+    "gas:ship": "bash scripts/gas-ship.sh"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

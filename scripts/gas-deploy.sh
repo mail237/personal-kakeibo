@@ -3,30 +3,9 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# .env.local から GAS_* を読む（未 export のときだけ）
-if [[ -f "${ROOT_DIR}/.env.local" ]]; then
-  while IFS= read -r raw || [[ -n "${raw}" ]]; do
-    line="${raw%%#*}"
-    line="${line%"${line##*[![:space:]]}"}"
-    line="${line#"${line%%[![:space:]]*}"}"
-    [[ -z "${line}" ]] && continue
-    if [[ "${line}" =~ ^GAS_SCRIPT_ID=(.*)$ ]]; then
-      v="${BASH_REMATCH[1]}"
-      v="${v%"${v##*[![:space:]]}"}"
-      v="${v#"${v%%[![:space:]]*}"}"
-      v="${v%\"}"
-      v="${v#\"}"
-      [[ -n "${v}" && -z "${GAS_SCRIPT_ID:-}" ]] && export GAS_SCRIPT_ID="${v}"
-    elif [[ "${line}" =~ ^GAS_DEPLOYMENT_ID=(.*)$ ]]; then
-      v="${BASH_REMATCH[1]}"
-      v="${v%"${v##*[![:space:]]}"}"
-      v="${v#"${v%%[![:space:]]*}"}"
-      v="${v%\"}"
-      v="${v#\"}"
-      [[ -n "${v}" && -z "${GAS_DEPLOYMENT_ID:-}" ]] && export GAS_DEPLOYMENT_ID="${v}"
-    fi
-  done <"${ROOT_DIR}/.env.local"
-fi
+# shellcheck source=_gas-env.sh
+source "${ROOT_DIR}/scripts/_gas-env.sh"
+gas_load_env_from_local "${ROOT_DIR}"
 
 if [[ -z "${GAS_SCRIPT_ID:-}" ]]; then
   echo "ERROR: GAS_SCRIPT_ID が未設定です。"
@@ -50,4 +29,11 @@ else
   echo ""
   echo "NOTE:"
   echo "- 既存の WebアプリURL を固定したい場合は、上の deploy 出力に出る deploymentId を GAS_DEPLOYMENT_ID に設定して再実行してください。"
+fi
+
+echo ""
+if [[ "${SKIP_GAS_VERIFY:-}" == "1" ]]; then
+  echo "WARN: SKIP_GAS_VERIFY=1 のため GAS 応答検証をスキップしました。"
+else
+  bash "${ROOT_DIR}/scripts/gas-verify.sh"
 fi

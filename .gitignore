@@ -2,10 +2,9 @@
 node_modules
 .next
 
-# clasp (generated locally by scripts)
+# clasp（.clasp.json は手元で scripts が生成。appsscript.json は CI 用にリポジトリへ含める）
 gas/.clasp.json
 gas/.claspignore
-gas/appsscript.json
 
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 

@@ -1,0 +1,118 @@
+# gas/Code.gs を main に push したら clasp push + deploy を自動実行します。
+# 初回のみ GitHub の Settings → Secrets and variables → Actions に次を登録してください。
+#
+# 必須:
+#   CLASPRC_JSON      ~/.clasprc.json の中身（clasp login 済みマシンからコピー）
+#   GAS_SCRIPT_ID     Apps Script のスクリプト ID
+#   GAS_DEPLOYMENT_ID ウェブアプリのデプロイ ID（URL の /macros/s/ と /exec の間）
+#
+# 任意（設定すると CI 上で検証・Vercel 同期・本番再デプロイまで自動）:
+#   GAS_WEBAPP_URL         https://script.google.com/macros/s/.../exec
+#   GAS_SHARED_SECRET      Next / Vercel と同じ値
+#   VERCEL_TOKEN           Vercel → Settings → Tokens
+#   VERCEL_ORG_ID          .vercel/project.json の orgId、または Vercel ダッシュボードの Team ID
+#   VERCEL_PROJECT_ID      .vercel/project.json の projectId
+#   VERCEL_DEPLOY_HOOK_URL 任意: Deploy Hooks の URL（env 更新後に本番ビルドを走らせる）
+
+name: Deploy GAS (clasp)
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "gas/**"
+      - ".github/workflows/gas-autodeploy.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: gas-autodeploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - run: npm ci
+
+      - name: Clasp credentials
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+        run: |
+          if [[ -z "${CLASPRC_JSON:-}" ]]; then
+            echo "ERROR: GitHub Actions の Repository secrets に CLASPRC_JSON を設定してください（~/.clasprc.json の全文）。"
+            exit 1
+          fi
+          echo "$CLASPRC_JSON" >"$HOME/.clasprc.json"
+          chmod 600 "$HOME/.clasprc.json"
+
+      - name: Write gas/.clasp.json
+        env:
+          GAS_SCRIPT_ID: ${{ secrets.GAS_SCRIPT_ID }}
+        run: |
+          if [[ -z "${GAS_SCRIPT_ID:-}" ]]; then
+            echo "ERROR: Repository secrets に GAS_SCRIPT_ID を設定してください。"
+            exit 1
+          fi
+          printf '%s\n' "{\"scriptId\":\"${GAS_SCRIPT_ID}\",\"rootDir\":\".\"}" >gas/.clasp.json
+
+      - name: clasp push && clasp deploy
+        working-directory: gas
+        env:
+          GAS_DEPLOYMENT_ID: ${{ secrets.GAS_DEPLOYMENT_ID }}
+        run: |
+          if [[ -z "${GAS_DEPLOYMENT_ID:-}" ]]; then
+            echo "ERROR: Repository secrets に GAS_DEPLOYMENT_ID（ウェブアプリの AKfycb…）を設定してください。"
+            exit 1
+          fi
+          npx clasp push --force
+          npx clasp deploy -i "${GAS_DEPLOYMENT_ID}" -d "ci ${{ github.sha }}"
+
+      - name: Verify GAS web app (optional)
+        env:
+          GAS_WEBAPP_URL: ${{ secrets.GAS_WEBAPP_URL }}
+        run: |
+          if [[ -z "${GAS_WEBAPP_URL:-}" ]]; then
+            echo "SKIP: Secret GAS_WEBAPP_URL が無いため GET 検証をスキップ（設定推奨）。"
+            exit 0
+          fi
+          bash scripts/gas-verify.sh
+
+      - name: Sync Vercel env (optional)
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          GAS_WEBAPP_URL: ${{ secrets.GAS_WEBAPP_URL }}
+          GAS_SHARED_SECRET: ${{ secrets.GAS_SHARED_SECRET }}
+        run: |
+          if [[ -z "${VERCEL_TOKEN:-}" ]]; then
+            echo "SKIP: VERCEL_TOKEN が無いため Vercel 環境変数同期をスキップ。"
+            exit 0
+          fi
+          if [[ -z "${GAS_WEBAPP_URL:-}" || -z "${GAS_SHARED_SECRET:-}" ]]; then
+            echo "SKIP: GAS_WEBAPP_URL / GAS_SHARED_SECRET が無いため Vercel 同期をスキップ。"
+            exit 0
+          fi
+          if [[ -z "${VERCEL_ORG_ID:-}" || -z "${VERCEL_PROJECT_ID:-}" ]]; then
+            echo "SKIP: VERCEL_ORG_ID / VERCEL_PROJECT_ID が無いため Vercel 同期をスキップ。"
+            exit 0
+          fi
+          bash scripts/gas-vercel-sync.sh
+
+      - name: Trigger Vercel redeploy (optional)
+        env:
+          VERCEL_DEPLOY_HOOK_URL: ${{ secrets.VERCEL_DEPLOY_HOOK_URL }}
+        run: |
+          if [[ -z "${VERCEL_DEPLOY_HOOK_URL:-}" ]]; then
+            echo "SKIP: VERCEL_DEPLOY_HOOK_URL が無いため Deploy Hook は実行しません（任意）。"
+            exit 0
+          fi
+          curl -sfS -X POST "$VERCEL_DEPLOY_HOOK_URL" -o /dev/null
+          echo "OK: Vercel Deploy Hook を実行しました。"
