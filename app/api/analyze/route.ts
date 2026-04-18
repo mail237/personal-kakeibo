@@ -37,7 +37,10 @@ export async function POST(req: NextRequest) {
       const analysis = await analyzeImage(mode, base64, mime, text);
       return NextResponse.json({
         ok: true,
-        analysis: postprocessKakeiboForSave(analysis, { sourceText: text }),
+        analysis: postprocessKakeiboForSave(analysis, {
+          sourceText: text,
+          analyzedWithImage: true,
+        }),
       });
     }
 
@@ -51,7 +54,10 @@ export async function POST(req: NextRequest) {
     const analysis = await analyzeText(mode, text);
     return NextResponse.json({
       ok: true,
-      analysis: postprocessKakeiboForSave(analysis, { sourceText: text }),
+      analysis: postprocessKakeiboForSave(analysis, {
+        sourceText: text,
+        analyzedWithImage: false,
+      }),
     });
   } catch (e) {
     const msg = friendlyGeminiErrorMessage(e);

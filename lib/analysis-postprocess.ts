@@ -17,14 +17,40 @@ function ensureAnalysisDate(r: AnalysisResult): AnalysisResult {
   return { ...r, date: jstYmdToday() };
 }
 
+/** 「1/3錠」「1/2回」などを日付 m/d と誤認しないよう除く */
+function stripDosageLikeSlashPatterns(text: string): string {
+  return text.replace(
+    /\d{1,2}\s*\/\s*\d{1,2}\s*(?:錠|錢|回|mg|ｍｇ|ML|ml|枚|滴|割|カップ|包|錠剤)/gi,
+    " "
+  );
+}
+
+/** m/d がカレンダーっぽいか（1/2・1/3 等は用量として除外） */
+function slashPairLooksLikeMonthDay(a: number, b: number): boolean {
+  if (a < 1 || a > 12 || b < 1 || b > 31) return false;
+  if (a <= 2 && b <= 3) return false;
+  return true;
+}
+
+function textHasSlashMonthDay(text: string): boolean {
+  const re = /(?:^|[^\d/])(\d{1,2})\s*\/\s*(\d{1,2})(?:[^\d]|$)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const mo = parseInt(m[1], 10);
+    const da = parseInt(m[2], 10);
+    if (slashPairLooksLikeMonthDay(mo, da)) return true;
+  }
+  return false;
+}
+
 /** summary・fields に「その日付」が書かれていないのに date だけ変な年になるのを防ぐ */
 function textSuggestsCalendarOrRelativeDate(text: string): boolean {
-  const t = text.trim();
+  const t = stripDosageLikeSlashPatterns(text).trim();
   if (!t) return false;
   if (/\d{4}\s*[-／/]\s*\d{1,2}\s*[-／/]\s*\d{1,2}/.test(t)) return true;
   if (/\d{4}年\s*\d{1,2}月\s*\d{1,2}日/.test(t)) return true;
   if (/\d{1,2}\s*月\s*\d{1,2}\s*日/.test(t)) return true;
-  if (/(?:^|[^\d/])(\d{1,2})\/(\d{1,2})(?:[^\d]|$)/.test(t)) return true;
+  if (textHasSlashMonthDay(t)) return true;
   if (/今日|本日|昨日|一昨日|明日|先日|先週|今週|来週|あさって|おととい/.test(t)) {
     return true;
   }
@@ -32,37 +58,51 @@ function textSuggestsCalendarOrRelativeDate(text: string): boolean {
 }
 
 export type PostprocessOptions = {
-  /** ユーザーがフォームに打った原文。行動ログの日付は「ここ」に日付が無ければ当日固定（AIが summary/content に捏造した日付は無視） */
+  /** ユーザーがフォームに打った原文。日付が無ければ当日固定（AI の date を信じない） */
   sourceText?: string;
+  /** 画像つき解析。家計簿はレシート日付を残すためメモだけでは上書きしない */
+  analyzedWithImage?: boolean;
 };
 
 /**
- * 行動ログ: モデルが date や summary に迷走日付を入れても、ユーザー入力に根拠がなければ当日にする。
- * （家計簿はレシートの日付が summary/備考に出ないことがあり、このロジックを掛けると壊れる）
+ * ユーザー入力に日付が無いとき AI が入れた date（例: 2024-05-15）を捨てて当日にする。
+ * テキストのみならカテゴリ問わず適用。画像＋家計簿だけはレシート日付を残す。
  */
-function useTodayUnlessDateAppearsInText(
+function resolveAnalysisDateFromUser(
   r: AnalysisResult,
   opts?: PostprocessOptions
 ): AnalysisResult {
-  if (r.category !== "log") return r;
   const userSrc = opts?.sourceText?.trim() ?? "";
-  if (userSrc.length > 0) {
-    if (!textSuggestsCalendarOrRelativeDate(userSrc)) {
-      return { ...r, date: jstYmdToday() };
-    }
-    return r;
-  }
-  const bucket = [
-    r.summary,
-    ...Object.values(r.fields).map((v) => (v == null ? "" : String(v))),
-  ].join("\n");
-  const d = String(r.date ?? "").trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) {
+  const withImage = opts?.analyzedWithImage === true;
+  const userHasCalendarHint =
+    userSrc.length > 0 && textSuggestsCalendarOrRelativeDate(userSrc);
+
+  if (!withImage && userSrc.length > 0 && !userHasCalendarHint) {
     return { ...r, date: jstYmdToday() };
   }
-  if (bucket.includes(d)) return r;
-  if (textSuggestsCalendarOrRelativeDate(bucket)) return r;
-  return { ...r, date: jstYmdToday() };
+
+  if (withImage && userSrc.length > 0 && !userHasCalendarHint) {
+    if (r.category === "kakeibo") {
+      return r;
+    }
+    return { ...r, date: jstYmdToday() };
+  }
+
+  if (r.category === "log" && userSrc.length === 0) {
+    const bucket = [
+      r.summary,
+      ...Object.values(r.fields).map((v) => (v == null ? "" : String(v))),
+    ].join("\n");
+    const d = String(r.date ?? "").trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) {
+      return { ...r, date: jstYmdToday() };
+    }
+    if (bucket.includes(d)) return r;
+    if (textSuggestsCalendarOrRelativeDate(bucket)) return r;
+    return { ...r, date: jstYmdToday() };
+  }
+
+  return r;
 }
 
 /** 全角数字 → 半角（１５８０ → 1580） */
@@ -288,7 +328,7 @@ export function postprocessKakeiboForSave(
   r: AnalysisResult,
   opts?: PostprocessOptions
 ): AnalysisResult {
-  const withDate = useTodayUnlessDateAppearsInText(ensureAnalysisDate(r), opts);
+  const withDate = resolveAnalysisDateFromUser(ensureAnalysisDate(r), opts);
   const afterPet = fillPetCostIfMissing(withDate);
   const afterAmount1 = fillKakeiboAmountIfMissing(afterPet);
   const afterSummary = normalizeKakeiboShortSummary(afterAmount1);
