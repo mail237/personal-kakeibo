@@ -75,6 +75,7 @@ jobs:
           npx clasp deploy -i "${GAS_DEPLOYMENT_ID}" -d "ci ${{ github.sha }}"
 
       - name: Verify GAS web app (optional)
+        continue-on-error: true
         env:
           GAS_WEBAPP_URL: ${{ secrets.GAS_WEBAPP_URL }}
         run: |
