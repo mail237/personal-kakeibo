@@ -21,6 +21,11 @@ export default function RootLayout({
   return (
     <html lang="ja">
       <body className={`${geistSans.variable} min-h-screen bg-zinc-100 antialiased`}>
+        <noscript>
+          <div className="p-4 text-center text-sm text-zinc-800">
+            このアプリは JavaScript が必要です。ブラウザの設定で有効にしてください。
+          </div>
+        </noscript>
         {children}
       </body>
     </html>

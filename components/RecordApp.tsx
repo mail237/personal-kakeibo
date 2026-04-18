@@ -20,15 +20,16 @@ function categoryLabel(c: AnalysisResult["category"]): string {
 
 /** 直近一覧: 行動ログの C は時間。家計簿・医療・塾・ペットの C は金額 */
 function formatRecentSubline(e: RecentEntry): string {
-  const parts = [e.cells[1]].filter(Boolean);
-  const c = e.cells[2] ?? "";
+  const cells = Array.isArray(e.cells) ? e.cells : [];
+  const parts = [cells[1] ?? ""].filter(Boolean);
+  const c = cells[2] ?? "";
   if (e.sheet === "log") {
     if (c !== "") parts.push(String(c));
   } else if (c !== "") {
     const n = Number(String(c).replace(/,/g, ""));
     parts.push(Number.isFinite(n) && n !== 0 ? `¥${n}` : String(c));
   }
-  const d = e.cells[3];
+  const d = cells[3];
   if (d) parts.push(String(d));
   return parts.join(" · ");
 }
@@ -302,14 +303,16 @@ export default function RecordApp() {
           )}
           {entries.map((e, i) => (
             <li
-              key={`${e.label}-${i}-${e.cells[0]}`}
+              key={`${e.label}-${i}-${(e.cells ?? [])[0] ?? i}`}
               className="rounded-xl border border-zinc-100 bg-white px-3 py-2 text-sm shadow-sm"
             >
               <div className="mb-1 flex items-center justify-between gap-2">
                 <span className="text-xs font-semibold text-emerald-700">
                   {e.label}
                 </span>
-                <span className="text-xs text-zinc-400">{e.cells[0]}</span>
+                <span className="text-xs text-zinc-400">
+                  {(e.cells ?? [])[0] ?? ""}
+                </span>
               </div>
               <p className="line-clamp-2 text-zinc-700">
                 {formatRecentSubline(e)}
