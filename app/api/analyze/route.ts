@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { analyzeImage, analyzeText } from "@/lib/gemini-analyze";
+import { postprocessKakeiboForSave } from "@/lib/analysis-postprocess";
+import {
+  analyzeImage,
+  analyzeText,
+  friendlyGeminiErrorMessage,
+} from "@/lib/gemini-analyze";
 import type { InputMode } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -30,7 +35,10 @@ export async function POST(req: NextRequest) {
       const base64 = buf.toString("base64");
       const mime = file.type || "image/jpeg";
       const analysis = await analyzeImage(mode, base64, mime, text);
-      return NextResponse.json({ ok: true, analysis });
+      return NextResponse.json({
+        ok: true,
+        analysis: postprocessKakeiboForSave(analysis),
+      });
     }
 
     if (!text.trim()) {
@@ -41,9 +49,12 @@ export async function POST(req: NextRequest) {
     }
 
     const analysis = await analyzeText(mode, text);
-    return NextResponse.json({ ok: true, analysis });
+    return NextResponse.json({
+      ok: true,
+      analysis: postprocessKakeiboForSave(analysis),
+    });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "解析に失敗しました。";
+    const msg = friendlyGeminiErrorMessage(e);
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

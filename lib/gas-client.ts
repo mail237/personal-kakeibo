@@ -5,6 +5,18 @@ function getGasConfig() {
   const secret = process.env.GAS_SHARED_SECRET?.trim();
   if (!url) throw new Error("GAS_WEBAPP_URL が設定されていません。");
   if (!secret) throw new Error("GAS_SHARED_SECRET が設定されていません。");
+  if (!/^https?:\/\//i.test(url)) {
+    throw new Error(
+      "GAS_WEBAPP_URL がURLではありません。Vercel の環境変数に「https://script.google.com/macros/s/.../exec」を貼ってください（スプレッドシートIDを貼っていないか確認）。"
+    );
+  }
+  try {
+    new URL(url);
+  } catch {
+    throw new Error(
+      "GAS_WEBAPP_URL が無効です。Apps Script の「デプロイを管理」に表示されるウェブアプリのURLをそのまま貼り直してください。"
+    );
+  }
   return { url, secret };
 }
 
@@ -41,8 +53,14 @@ async function gasPost<T>(payload: unknown): Promise<T> {
   return obj as unknown as T;
 }
 
-export async function gasAppend(analysis: AnalysisResult): Promise<void> {
-  await gasPost<{ ok: true }>({ action: "append", analysis });
+export async function gasAppend(
+  analysis: AnalysisResult
+): Promise<{ deduped: boolean }> {
+  const res = await gasPost<{ ok: true; deduped?: boolean }>({
+    action: "append",
+    analysis,
+  });
+  return { deduped: res.deduped === true };
 }
 
 export async function gasRecent(limitPerSheet = 6): Promise<RecentEntry[]> {

@@ -1,5 +1,44 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## GAS をターミナルから更新（自動化）
+
+`gas/Code.gs` を Apps Script に反映し、必要ならデプロイまでターミナルから行えます（初回のみログインが必要）。
+
+### 1) 初回セットアップ
+
+- Apps Script のプロジェクトID（scriptId）を用意
+- Google にログイン（初回のみ）
+
+```bash
+npx clasp login
+```
+
+### 2) 環境変数を設定
+
+```bash
+export GAS_SCRIPT_ID="（Apps Script の scriptId）"
+
+# 既存の WebアプリURL を変えたくない場合（推奨）
+# すでに Webアプリとしてデプロイ済みなら、その deploymentId を設定
+export GAS_DEPLOYMENT_ID="（任意）"
+```
+
+### 3) 実行
+
+- コード反映だけ:
+
+```bash
+npm run gas:push
+```
+
+- コード反映 + デプロイ:
+
+```bash
+npm run gas:deploy
+```
+
+`GAS_DEPLOYMENT_ID` を指定すると **同じデプロイ先** を更新できます（URL を固定しやすいです）。
+
 ## Getting Started
 
 First, run the development server:

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { postprocessKakeiboForSave } from "@/lib/analysis-postprocess";
 import { gasAppend } from "@/lib/gas-client";
 import type { AnalysisResult } from "@/lib/types";
 
@@ -27,8 +28,8 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
-    await gasAppend(analysis);
-    return NextResponse.json({ ok: true });
+    const { deduped } = await gasAppend(postprocessKakeiboForSave(analysis));
+    return NextResponse.json({ ok: true, deduped });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "保存に失敗しました。";
     return NextResponse.json({ error: msg }, { status: 500 });

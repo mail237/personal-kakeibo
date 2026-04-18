@@ -1,7 +1,8 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import type { InputMode, SheetCategory } from "./types";
+import type { AnalysisCategory, InputMode } from "./types";
 import { parseModelJsonText } from "./parse-model-json";
 import type { AnalysisResult } from "./types";
+import { postprocessKakeiboForSave } from "./analysis-postprocess";
 
 /**
  * GEMINI_MODEL を指定しない場合、無料枠やリージョンで使えるモデルが違うため
@@ -13,30 +14,90 @@ const GEMINI_MODEL_FALLBACKS = [
   "gemini-2.0-flash-lite",
   "gemini-2.5-flash",
   "gemini-2.0-flash",
+  /** 混雑時は別系統の方が通ることがある */
+  "gemini-1.5-flash",
 ] as const;
 
 function shouldTryNextModel(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
-  return /404|429|quota|Quota|not found|NOT_FOUND|RESOURCE_EXHAUSTED/i.test(msg);
+  return /404|429|503|quota|Quota|not found|NOT_FOUND|RESOURCE_EXHAUSTED|Service Unavailable|high demand|experiencing high demand|overloaded|UNAVAILABLE|try again later/i.test(
+    msg
+  );
+}
+
+function isQuotaOrRateLimit(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /429|Too Many Requests|RESOURCE_EXHAUSTED|quota exceeded|exceeded your current quota|generate_content_limit/i.test(
+    msg
+  );
+}
+
+/** API ルート向け: 429 などは画面にそのまま出さない */
+export function friendlyGeminiErrorMessage(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  if (
+    isQuotaOrRateLimit(err) ||
+    /exceeded your current quota|check your plan and billing|FreeTier|billing details/i.test(raw)
+  ) {
+    return "Gemini の利用枠に達しました（無料枠の1日あたり上限など）。しばらく待つか、Google AI Studio で課金を有効にするか、別プロジェクトの API キーを試してください。https://aistudio.google.com/";
+  }
+  if (raw.length > 800) {
+    return `${raw.slice(0, 800)}…`;
+  }
+  return raw;
+}
+
+/** エラー本文の "Please retry in 7.08s" や retryDelay を拾う */
+function retryAfterMsFromGeminiError(err: unknown): number | null {
+  const msg = err instanceof Error ? err.message : String(err);
+  const sec = msg.match(/retry in ([\d.]+)\s*s/i);
+  if (sec) {
+    const ms = Math.ceil(parseFloat(sec[1]) * 1000);
+    return Math.min(Math.max(ms, 0), 60_000);
+  }
+  const delay = msg.match(/"retryDelay"\s*:\s*"(\d+)s"/i);
+  if (delay) {
+    const ms = parseInt(delay[1], 10) * 1000;
+    return Math.min(Math.max(ms, 0), 60_000);
+  }
+  return null;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
 }
 
 async function withGeminiModelFallback<T>(
   run: (modelId: string) => Promise<T>
 ): Promise<T> {
   const explicit = process.env.GEMINI_MODEL?.trim();
-  if (explicit) {
-    return run(explicit);
-  }
+  /** 明示指定があっても 503 等は次のモデルへ（混雑時の回避） */
+  const base = [...GEMINI_MODEL_FALLBACKS];
+  const tryOrder: string[] = explicit
+    ? [explicit, ...base.filter((id) => id !== explicit)]
+    : base;
   let lastErr: unknown;
-  for (const id of GEMINI_MODEL_FALLBACKS) {
-    try {
-      return await run(id);
-    } catch (e) {
-      lastErr = e;
-      if (shouldTryNextModel(e)) {
-        continue;
+
+  /** 全モデル失敗時に少し待ってもう一周（混雑・429 の連続向け） */
+  for (let round = 0; round < 3; round++) {
+    if (round > 0) {
+      await sleep(2800);
+    }
+    for (const id of tryOrder) {
+      try {
+        return await run(id);
+      } catch (e) {
+        lastErr = e;
+        if (shouldTryNextModel(e)) {
+          const fromApi = retryAfterMsFromGeminiError(e);
+          const waitMs =
+            fromApi ??
+            (isQuotaOrRateLimit(e) ? 3500 : 400);
+          await sleep(waitMs);
+          continue;
+        }
+        throw e;
       }
-      throw e;
     }
   }
   if (lastErr instanceof Error) throw lastErr;
@@ -57,12 +118,12 @@ function modeInstruction(mode: InputMode): string {
 - log: 作業時間・習慣・日記・TODO 完了など行動・ログ系`;
   }
   if (mode === "medical") {
-    return `ユーザーは手動で「医療」を選びました。必ず category は "kakeibo" にし、fields.category は必ず "医療" に固定してください。summary は先頭に [医療] を付けてください。`;
+    return `ユーザーは手動で「医療」を選びました。必ず category は "kakeibo" にし、fields.category は必ず "医療" に固定してください。summary は必ず "[医療]" のみ（短い見出しだけ）。詳細はすべて fields.bikou（備考）に書いてください。`;
   }
   if (mode === "juku") {
-    return `ユーザーは手動で「塾関係」を選びました。必ず category は "kakeibo" にし、fields.category は必ず "塾関係" に固定してください。summary は先頭に [塾関係] を付けてください。`;
+    return `ユーザーは手動で「塾関係」を選びました。必ず category は "kakeibo" にし、fields.category は必ず "塾関係" に固定してください。summary は必ず "[塾関係]" のみ（短い見出しだけ）。詳細はすべて fields.bikou（備考）に書いてください。`;
   }
-  const map: Record<Exclude<InputMode, "auto" | "medical" | "juku">, SheetCategory> = {
+  const map: Record<Exclude<InputMode, "auto" | "medical" | "juku">, AnalysisCategory> = {
     kakeibo: "kakeibo",
     pet: "pet",
     log: "log",
@@ -83,19 +144,21 @@ function buildPrompt(mode: InputMode, userText: string): string {
   "category": "kakeibo" | "pet" | "log",
   "date": "YYYY-MM-DD（不明なら今日の日付を推定。日本時間基準）",
   "fields": { ... },
-  "summary": "一行の日本語サマリー（できれば先頭にカテゴリを角括弧で付ける。例: [医療] 内科 1200円）"
+  "summary": "概要欄用の短い見出しのみ（例: [飲食] または [交通費]。長文・店名・レシートの詳細は書かない）"
 }
 
 ${modeInstruction(mode)}
 
 fields のルール:
 - category が kakeibo のとき:
-  { "shubetsu": "支出|収入|その他", "amount": 数値（円、不明なら0）, "category": "食費|交通費|医療|塾関係|ペット費|日用品|通信|光熱費|住居|交際|娯楽|その他", "memo": "補足" }
-- category が pet のとき: { "content": "内容", "hospital": "病院名（なければ空文字）", "cost": 数値（円、不明なら0）, "nextDue": "次回予定（なければ空文字）" }
-- category が log のとき: { "time": "HH:mm または空", "content": "内容", "tags": "カンマ区切りタグ" }
+  { "shubetsu": "支出|収入|その他", "amount": 数値（円、不明なら0）, "category": "飲食|食費|交通費|医療|塾関係|ペット費|日用品|通信|光熱費|住居|交際|娯楽|その他", "bikou": "備考（店名・品目・状況などの詳細。なければ空文字）" }
+- category が pet のとき: { "content": "内容（詳細）", "hospital": "病院名（なければ空文字）", "cost": 数値（円、不明なら0）, "nextDue": "次回予定（なければ空文字）" } ／ summary は短く（例: [ペット]）でよい
+- category が log のとき: { "time": "時間帯（スプレッドシートのC列。例 10:00〜11:00 または 10:28。空なら可）", "content": "詳細・場所（D列の備考）", "tags": "カンマ区切りタグ（D列に続けて書く）" } ／ summary は短い見出しのみ（例: 散歩、勉強）。time の内容は content に繰り返さない
 
 家計簿カテゴリの補足ルール:
 - 書籍 / 本 / 参考書 / 問題集 / 教材 / 学習アプリなど「勉強に使う購入」は、原則 category を "塾関係" にしてください。
+- summary は短い見出しだけ。bikou に詳細を書く。金額は必ず fields.amount（円）に入れる（summary には金額を書かなくてよい）。
+- store_name / items / total だけの別形式に置き換えないでください。必ず category・date・fields・summary をトップレベルに含めてください。
 
 ユーザーのテキスト:
 ${userText}
@@ -114,18 +177,162 @@ ${hintBlock}
   "category": "kakeibo" | "pet" | "log",
   "date": "YYYY-MM-DD",
   "fields": { ... },
-  "summary": "一行の日本語サマリー（できれば先頭にカテゴリを角括弧で付ける。例: [塾関係] 月謝 12000円）"
+  "summary": "概要欄用の短い見出しのみ（例: [飲食]）。詳細は fields.bikou（家計簿）または各カテゴリの content などへ"
 }
 
 ${modeInstruction(mode)}
 
 fields のルールはテキスト解析と同じです（kakeibo / pet / log それぞれ）。
-レシートなら通常 kakeibo。動物病院なら pet。`;
+レシートなら通常 kakeibo。動物病院なら pet。
+kakeibo では金額は fields.amount に数値（円）を入れる。店名・品目などの詳細は fields.bikou に書く。
+行動ログでは fields.time をスプレッドシートの「時間」列にそのまま保存する（例 10:00〜11:00）。詳細は fields.content / tags に。
+
+重要: store_name / items / total だけの別形式の JSON に置き換えないでください。必ず上記の category・date・fields・summary をトップレベルに含めてください（レシートでも同じ）。`;
 }
 
-function normalizeResult(raw: unknown): AnalysisResult {
+function jstYmdTokyo(d = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Tokyo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
+}
+
+function looksLikeStandardAnalysis(o: Record<string, unknown>): boolean {
+  const cat = o.category;
+  if (cat !== "kakeibo" && cat !== "pet" && cat !== "log") return false;
+  const fields = o.fields;
+  if (!fields || typeof fields !== "object" || Array.isArray(fields)) return false;
+  if (typeof o.summary !== "string" || !o.summary.trim()) return false;
+  const date = typeof o.date === "string" ? o.date : "";
+  return /^\d{4}-\d{2}-\d{2}$/.test(date);
+}
+
+function extractDateYmdLoose(o: Record<string, unknown>): string | null {
+  const keys = [
+    "date",
+    "transaction_date",
+    "purchase_date",
+    "receipt_date",
+    "sale_date",
+  ];
+  for (const k of keys) {
+    const v = o[k];
+    if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
+  }
+  for (const k of keys) {
+    const v = o[k];
+    if (typeof v === "string") {
+      const m = v.match(/(\d{4})年(\d{1,2})月(\d{1,2})日/);
+      if (m) {
+        return `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
+      }
+    }
+  }
+  return null;
+}
+
+function pickReceiptTotal(o: Record<string, unknown>): number {
+  if (typeof o.total === "number" && Number.isFinite(o.total) && o.total > 0) {
+    return o.total;
+  }
+  if (typeof o.subtotal === "number" && Number.isFinite(o.subtotal) && o.subtotal > 0) {
+    return o.subtotal;
+  }
+  const items = Array.isArray(o.items) ? o.items : [];
+  let sum = 0;
+  for (const it of items) {
+    if (!it || typeof it !== "object") continue;
+    const row = it as Record<string, unknown>;
+    const price = typeof row.price === "number" ? row.price : 0;
+    const qty =
+      typeof row.quantity === "number" && row.quantity > 0 ? row.quantity : 1;
+    if (Number.isFinite(price)) sum += price * qty;
+  }
+  return sum > 0 ? sum : 0;
+}
+
+function buildBikouFromReceiptLike(o: Record<string, unknown>): string {
+  const lines: string[] = [];
+  const store = String(o.store_name ?? o.store ?? "").trim();
+  if (store) lines.push(store);
+  const items = Array.isArray(o.items) ? o.items : [];
+  for (const it of items) {
+    if (!it || typeof it !== "object") continue;
+    const row = it as Record<string, unknown>;
+    const name = String(row.name ?? "").trim();
+    const qty = row.quantity;
+    const price = row.price;
+    const parts: string[] = [];
+    if (name) parts.push(name);
+    if (typeof qty === "number") parts.push(`×${qty}`);
+    if (typeof price === "number") parts.push(`${price}円`);
+    const line = parts.join(" ");
+    if (line) lines.push(line);
+  }
+  const extra: string[] = [];
+  if (typeof o.payment_method === "string" && o.payment_method.trim()) {
+    extra.push(`支払い: ${o.payment_method.trim()}`);
+  }
+  if (typeof o.tax_rate === "string" && o.tax_rate.trim()) {
+    extra.push(`税率: ${o.tax_rate.trim()}`);
+  }
+  if (typeof o.tax_amount === "number" && o.tax_amount > 0) {
+    extra.push(`税: ${o.tax_amount}円`);
+  }
+  if (typeof o.change === "number") {
+    extra.push(`おつり: ${o.change}円`);
+  }
+  if (extra.length) lines.push(extra.join(" / "));
+  return lines.join("\n").trim();
+}
+
+/**
+ * モデルがレシート専用の別 JSON（store_name / items / total 等のみ）を返したとき
+ * アプリの AnalysisResult に正規化する。
+ */
+function tryCoerceReceiptLikeSchema(
+  o: Record<string, unknown>,
+  mode: InputMode
+): AnalysisResult | null {
+  if (mode !== "auto" && mode !== "kakeibo" && mode !== "medical" && mode !== "juku") {
+    return null;
+  }
+  const looksReceipt =
+    o.store_name != null ||
+    o.store != null ||
+    (Array.isArray(o.items) && o.items.length > 0) ||
+    typeof o.total === "number" ||
+    typeof o.subtotal === "number";
+  if (!looksReceipt) return null;
+
+  const amount = pickReceiptTotal(o);
+  const bikou = buildBikouFromReceiptLike(o);
+  const date = extractDateYmdLoose(o) ?? jstYmdTokyo();
+
+  return {
+    category: "kakeibo",
+    date,
+    fields: {
+      shubetsu: "支出",
+      amount: amount > 0 ? amount : 0,
+      category: "飲食",
+      bikou,
+    },
+    summary: "[飲食]",
+  };
+}
+
+function normalizeResult(raw: unknown, mode: InputMode): AnalysisResult {
   if (!raw || typeof raw !== "object") throw new Error("解析結果の形式が不正です。");
   const o = raw as Record<string, unknown>;
+
+  if (!looksLikeStandardAnalysis(o)) {
+    const coerced = tryCoerceReceiptLikeSchema(o, mode);
+    if (coerced) return coerced;
+  }
+
   const cat = o.category;
   if (cat !== "kakeibo" && cat !== "pet" && cat !== "log") {
     throw new Error(`category が不正です: ${String(cat)}`);
@@ -148,30 +355,29 @@ function normalizeResult(raw: unknown): AnalysisResult {
   };
 }
 
-function ensurePrefix(summary: string, prefix: string): string {
-  const s = summary.trim();
-  if (!s) return prefix;
-  if (s.startsWith(prefix)) return s;
-  // すでに [xxx] が付いている場合は置換せず追記（見た目優先）
-  if (/^\[[^\]]+\]/.test(s)) return `${prefix} ${s}`;
-  return `${prefix} ${s}`;
-}
-
 function applyModeOverrides(mode: InputMode, r: AnalysisResult): AnalysisResult {
   if (mode === "medical") {
+    const detail =
+      String(r.fields.bikou ?? "").trim() ||
+      String(r.fields.memo ?? "").trim() ||
+      String(r.summary).replace(/^\[医療\]\s*/, "").trim();
     return {
       ...r,
       category: "kakeibo",
-      fields: { ...r.fields, category: "医療" },
-      summary: ensurePrefix(r.summary, "[医療]"),
+      fields: { ...r.fields, category: "医療", bikou: detail },
+      summary: "[医療]",
     };
   }
   if (mode === "juku") {
+    const detail =
+      String(r.fields.bikou ?? "").trim() ||
+      String(r.fields.memo ?? "").trim() ||
+      String(r.summary).replace(/^\[塾関係\]\s*/, "").trim();
     return {
       ...r,
       category: "kakeibo",
-      fields: { ...r.fields, category: "塾関係" },
-      summary: ensurePrefix(r.summary, "[塾関係]"),
+      fields: { ...r.fields, category: "塾関係", bikou: detail },
+      summary: "[塾関係]",
     };
   }
   return r;
@@ -198,7 +404,9 @@ export async function analyzeText(
     const response = result.response;
     const out = response.text();
     const parsed = parseModelJsonText(out);
-    return applyModeOverrides(mode, normalizeResult(parsed));
+    return postprocessKakeiboForSave(
+      applyModeOverrides(mode, normalizeResult(parsed, mode))
+    );
   });
 }
 
@@ -233,6 +441,8 @@ export async function analyzeImage(
     ]);
     const out = result.response.text();
     const parsed = parseModelJsonText(out);
-    return applyModeOverrides(mode, normalizeResult(parsed));
+    return postprocessKakeiboForSave(
+      applyModeOverrides(mode, normalizeResult(parsed, mode))
+    );
   });
 }

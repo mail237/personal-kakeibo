@@ -18,6 +18,21 @@ function categoryLabel(c: AnalysisResult["category"]): string {
   return "行動ログ";
 }
 
+/** 直近一覧: 行動ログの C は時間。家計簿・医療・塾・ペットの C は金額 */
+function formatRecentSubline(e: RecentEntry): string {
+  const parts = [e.cells[1]].filter(Boolean);
+  const c = e.cells[2] ?? "";
+  if (e.sheet === "log") {
+    if (c !== "") parts.push(String(c));
+  } else if (c !== "") {
+    const n = Number(String(c).replace(/,/g, ""));
+    parts.push(Number.isFinite(n) && n !== 0 ? `¥${n}` : String(c));
+  }
+  const d = e.cells[3];
+  if (d) parts.push(String(d));
+  return parts.join(" · ");
+}
+
 /** プレビュー用：家計簿でも詳細カテゴリ（塾関係・医療など）をバッジに出す */
 function previewBadgeLabel(a: AnalysisResult): string {
   if (a.category === "kakeibo") {
@@ -34,6 +49,7 @@ export default function RecordApp() {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<AnalysisResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState<"analyze" | "save" | null>(null);
   const [entries, setEntries] = useState<RecentEntry[]>([]);
 
@@ -54,6 +70,7 @@ export default function RecordApp() {
 
   async function onAnalyze() {
     setError(null);
+    setNotice(null);
     setPreview(null);
     if (!text.trim() && !file) {
       setError("テキストを入力するか、画像を選んでください。");
@@ -79,6 +96,7 @@ export default function RecordApp() {
   async function onSave() {
     if (!preview) return;
     setError(null);
+    setNotice(null);
     setBusy("save");
     try {
       const res = await fetch("/api/save", {
@@ -88,6 +106,9 @@ export default function RecordApp() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "保存に失敗しました");
+      if (data.deduped === true) {
+        setNotice("直前の行と同じ内容のため、重複追加はしませんでした。");
+      }
       setPreview(null);
       setText("");
       setFile(null);
@@ -166,6 +187,11 @@ export default function RecordApp() {
           {error}
         </div>
       )}
+      {notice && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          {notice}
+        </div>
+      )}
 
       {preview && (
         <section className="space-y-3 rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4">
@@ -176,6 +202,13 @@ export default function RecordApp() {
             <span className="text-xs text-zinc-500">{preview.date}</span>
           </div>
           <p className="text-sm font-medium text-zinc-900">{preview.summary}</p>
+          {typeof preview.fields.bikou === "string" &&
+            preview.fields.bikou.trim() !== "" && (
+              <p className="text-sm leading-relaxed text-zinc-600">
+                <span className="font-medium text-zinc-500">備考</span>{" "}
+                {preview.fields.bikou}
+              </p>
+            )}
           <pre className="max-h-48 overflow-auto rounded-lg bg-white/80 p-3 text-xs text-zinc-700 ring-1 ring-emerald-100">
             {JSON.stringify(preview.fields, null, 2)}
           </pre>
@@ -228,7 +261,7 @@ export default function RecordApp() {
                 <span className="text-xs text-zinc-400">{e.cells[0]}</span>
               </div>
               <p className="line-clamp-2 text-zinc-700">
-                {e.cells.slice(1).filter(Boolean).join(" · ")}
+                {formatRecentSubline(e)}
               </p>
             </li>
           ))}
