@@ -2,12 +2,15 @@
 # 初回のみ GitHub の Settings → Secrets and variables → Actions に次を登録してください。
 #
 # 必須:
-#   CLASPRC_JSON      ~/.clasprc.json の中身（clasp login 済みマシンからコピー）
-#   GAS_SCRIPT_ID     Apps Script のスクリプト ID
-#   GAS_DEPLOYMENT_ID ウェブアプリのデプロイ ID（URL の /macros/s/ と /exec の間）
+#   CLASPRC_JSON   ~/.clasprc.json の中身（clasp login 済みマシンからコピー）
+#   GAS_SCRIPT_ID  Apps Script のスクリプト ID
+#
+# ウェブアプリの URL 用デプロイ ID は gas/WEBAPP_DEPLOYMENT_ID（コミット済み）。
+# clasp deploy -i はウェブアプリを壊すことがあるため、CI では push + version のみ。
+# 本番反映はエディタで「デプロイを管理」→ ウェブアプリを最新バージョンに更新（手動1手）。
 #
 # 任意（設定すると CI 上で検証・Vercel 同期・本番再デプロイまで自動）:
-#   GAS_WEBAPP_URL         https://script.google.com/macros/s/.../exec
+#   GAS_DEPLOYMENT_ID      任意: gas/WEBAPP_DEPLOYMENT_ID より優先
 #   GAS_SHARED_SECRET      Next / Vercel と同じ値
 #   VERCEL_TOKEN           Vercel → Settings → Tokens
 #   VERCEL_ORG_ID          .vercel/project.json の orgId、または Vercel ダッシュボードの Team ID
@@ -62,27 +65,22 @@ jobs:
           fi
           printf '%s\n' "{\"scriptId\":\"${GAS_SCRIPT_ID}\",\"rootDir\":\".\"}" >gas/.clasp.json
 
-      - name: clasp push && clasp deploy
+      - name: clasp push && clasp version
         working-directory: gas
-        env:
-          GAS_DEPLOYMENT_ID: ${{ secrets.GAS_DEPLOYMENT_ID }}
         run: |
-          if [[ -z "${GAS_DEPLOYMENT_ID:-}" ]]; then
-            echo "ERROR: Repository secrets に GAS_DEPLOYMENT_ID（ウェブアプリの AKfycb…）を設定してください。"
-            exit 1
-          fi
           npx clasp push --force
-          npx clasp deploy -i "${GAS_DEPLOYMENT_ID}" -d "ci ${{ github.sha }}"
+          npx clasp version "ci ${{ github.sha }}"
 
       - name: Verify GAS web app (optional)
         continue-on-error: true
         env:
-          GAS_WEBAPP_URL: ${{ secrets.GAS_WEBAPP_URL }}
+          GAS_DEPLOYMENT_ID: ${{ secrets.GAS_DEPLOYMENT_ID }}
         run: |
-          if [[ -z "${GAS_WEBAPP_URL:-}" ]]; then
-            echo "SKIP: Secret GAS_WEBAPP_URL が無いため GET 検証をスキップ（設定推奨）。"
-            exit 0
+          if [[ -z "${GAS_DEPLOYMENT_ID:-}" ]]; then
+            GAS_DEPLOYMENT_ID="$(tr -d ' \r\n\t' < gas/WEBAPP_DEPLOYMENT_ID)"
+            export GAS_DEPLOYMENT_ID
           fi
+          export GAS_WEBAPP_URL="https://script.google.com/macros/s/${GAS_DEPLOYMENT_ID}/exec"
           bash scripts/gas-verify.sh
 
       - name: Sync Vercel env (optional)
@@ -90,15 +88,19 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-          GAS_WEBAPP_URL: ${{ secrets.GAS_WEBAPP_URL }}
+          GAS_DEPLOYMENT_ID: ${{ secrets.GAS_DEPLOYMENT_ID }}
           GAS_SHARED_SECRET: ${{ secrets.GAS_SHARED_SECRET }}
         run: |
           if [[ -z "${VERCEL_TOKEN:-}" ]]; then
             echo "SKIP: VERCEL_TOKEN が無いため Vercel 環境変数同期をスキップ。"
             exit 0
           fi
-          if [[ -z "${GAS_WEBAPP_URL:-}" || -z "${GAS_SHARED_SECRET:-}" ]]; then
-            echo "SKIP: GAS_WEBAPP_URL / GAS_SHARED_SECRET が無いため Vercel 同期をスキップ。"
+          if [[ -z "${GAS_DEPLOYMENT_ID:-}" ]]; then
+            GAS_DEPLOYMENT_ID="$(tr -d ' \r\n\t' < gas/WEBAPP_DEPLOYMENT_ID)"
+            export GAS_DEPLOYMENT_ID
+          fi
+          if [[ -z "${GAS_DEPLOYMENT_ID:-}" || -z "${GAS_SHARED_SECRET:-}" ]]; then
+            echo "SKIP: GAS_DEPLOYMENT_ID / GAS_SHARED_SECRET が無いため Vercel 同期をスキップ。"
             exit 0
           fi
           if [[ -z "${VERCEL_ORG_ID:-}" || -z "${VERCEL_PROJECT_ID:-}" ]]; then

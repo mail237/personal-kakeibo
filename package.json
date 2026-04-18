@@ -11,7 +11,8 @@
     "gas:deploy": "bash scripts/gas-deploy.sh",
     "gas:verify": "bash scripts/gas-verify.sh",
     "gas:vercel": "bash scripts/gas-vercel-sync.sh",
-    "gas:ship": "bash scripts/gas-ship.sh"
+    "gas:ship": "bash scripts/gas-ship.sh",
+    "gas:pin-webapp": "python3 scripts/gas-pin-webapp.py"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

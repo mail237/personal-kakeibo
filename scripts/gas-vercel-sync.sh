@@ -4,7 +4,16 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=_gas-env.sh
 source "${ROOT_DIR}/scripts/_gas-env.sh"
+# shellcheck source=_gas-webapp-url.sh
+source "${ROOT_DIR}/scripts/_gas-webapp-url.sh"
 gas_load_env_from_local "${ROOT_DIR}"
+
+if [[ -f "${ROOT_DIR}/gas/WEBAPP_DEPLOYMENT_ID" ]]; then
+  export GAS_DEPLOYMENT_ID="$(tr -d ' \r\n\t' <"${ROOT_DIR}/gas/WEBAPP_DEPLOYMENT_ID")"
+elif [[ -z "${GAS_DEPLOYMENT_ID:-}" ]]; then
+  dep="$(gas_read_webapp_deployment_id_file "${ROOT_DIR}" || true)"
+  [[ -n "${dep}" ]] && export GAS_DEPLOYMENT_ID="${dep}"
+fi
 
 if [[ ! -f "${ROOT_DIR}/.vercel/project.json" ]]; then
   if [[ -n "${VERCEL_ORG_ID:-}" && -n "${VERCEL_PROJECT_ID:-}" ]]; then
@@ -17,8 +26,8 @@ if [[ ! -f "${ROOT_DIR}/.vercel/project.json" ]]; then
   fi
 fi
 
-if [[ -z "${GAS_WEBAPP_URL:-}" || -z "${GAS_SHARED_SECRET:-}" ]]; then
-  echo "ERROR: GAS_WEBAPP_URL と GAS_SHARED_SECRET が必要です（.env.local または環境変数）。"
+if [[ -z "${GAS_DEPLOYMENT_ID:-}" || -z "${GAS_SHARED_SECRET:-}" ]]; then
+  echo "ERROR: GAS_DEPLOYMENT_ID と GAS_SHARED_SECRET が必要です（.env.local または gas/WEBAPP_DEPLOYMENT_ID + 環境変数）。"
   exit 1
 fi
 
@@ -46,8 +55,8 @@ vc_sync() {
 }
 
 for env in ${GAS_VERCEL_ENVS}; do
-  vc_sync GAS_WEBAPP_URL "${GAS_WEBAPP_URL}" "${env}" 0
+  vc_sync GAS_DEPLOYMENT_ID "${GAS_DEPLOYMENT_ID}" "${env}" 0
   vc_sync GAS_SHARED_SECRET "${GAS_SHARED_SECRET}" "${env}" 1
 done
 
-echo "==> 完了: Vercel の GAS_WEBAPP_URL / GAS_SHARED_SECRET を同期しました（${GAS_VERCEL_ENVS}）。ダッシュボードで再デプロイすると本番に反映されます。"
+echo "==> 完了: Vercel の GAS_DEPLOYMENT_ID / GAS_SHARED_SECRET を同期しました（${GAS_VERCEL_ENVS}）。URL は GAS_DEPLOYMENT_ID から自動組み立てです。ダッシュボードで再デプロイすると本番に反映されます。"

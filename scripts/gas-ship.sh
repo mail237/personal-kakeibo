@@ -3,12 +3,12 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-echo "==> gas:ship（push → clasp deploy → 応答検証）"
+echo "==> gas:ship（push → version → 必要なら検証 / Vercel）"
 bash "${ROOT_DIR}/scripts/gas-deploy.sh"
 
 if [[ -f "${ROOT_DIR}/.vercel/project.json" ]]; then
   echo ""
-  echo "==> Vercel 環境変数同期（GAS_WEBAPP_URL / GAS_SHARED_SECRET）"
+  echo "==> Vercel 環境変数同期（GAS_DEPLOYMENT_ID / GAS_SHARED_SECRET）"
   bash "${ROOT_DIR}/scripts/gas-vercel-sync.sh"
 else
   echo ""

@@ -1,20 +1,20 @@
 import type { AnalysisResult, RecentEntry } from "./types";
+import { resolveGasWebAppUrl } from "./gas-webapp-url";
 
 function getGasConfig() {
-  const url = process.env.GAS_WEBAPP_URL?.trim();
+  const url = resolveGasWebAppUrl();
   const secret = process.env.GAS_SHARED_SECRET?.trim();
-  if (!url) throw new Error("GAS_WEBAPP_URL が設定されていません。");
   if (!secret) throw new Error("GAS_SHARED_SECRET が設定されていません。");
   if (!/^https?:\/\//i.test(url)) {
     throw new Error(
-      "GAS_WEBAPP_URL がURLではありません。Vercel の環境変数に「https://script.google.com/macros/s/.../exec」を貼ってください（スプレッドシートIDを貼っていないか確認）。"
+      "GAS の URL が不正です。GAS_DEPLOYMENT_ID（AKfycb…）か GAS_WEBAPP_URL を確認してください。"
     );
   }
   try {
     new URL(url);
   } catch {
     throw new Error(
-      "GAS_WEBAPP_URL が無効です。Apps Script の「デプロイを管理」に表示されるウェブアプリのURLをそのまま貼り直してください。"
+      "GAS の URL が無効です。GAS_DEPLOYMENT_ID または GAS_WEBAPP_URL を確認してください。"
     );
   }
   return { url, secret };
