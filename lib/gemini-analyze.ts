@@ -2,7 +2,6 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import type { AnalysisCategory, InputMode } from "./types";
 import { parseModelJsonText } from "./parse-model-json";
 import type { AnalysisResult } from "./types";
-import { postprocessKakeiboForSave } from "./analysis-postprocess";
 
 /**
  * GEMINI_MODEL を指定しない場合、無料枠やリージョンで使えるモデルが違うため
@@ -452,9 +451,7 @@ export async function analyzeText(
     const response = result.response;
     const out = response.text();
     const parsed = parseModelJsonText(out);
-    return postprocessKakeiboForSave(
-      applyModeOverrides(mode, normalizeResult(parsed, mode))
-    );
+    return applyModeOverrides(mode, normalizeResult(parsed, mode));
   });
 }
 
@@ -489,8 +486,6 @@ export async function analyzeImage(
     ]);
     const out = result.response.text();
     const parsed = parseModelJsonText(out);
-    return postprocessKakeiboForSave(
-      applyModeOverrides(mode, normalizeResult(parsed, mode))
-    );
+    return applyModeOverrides(mode, normalizeResult(parsed, mode));
   });
 }

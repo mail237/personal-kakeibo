@@ -31,12 +31,27 @@ function textSuggestsCalendarOrRelativeDate(text: string): boolean {
   return false;
 }
 
+export type PostprocessOptions = {
+  /** ユーザーがフォームに打った原文。行動ログの日付は「ここ」に日付が無ければ当日固定（AIが summary/content に捏造した日付は無視） */
+  sourceText?: string;
+};
+
 /**
- * 行動ログ: モデルが date だけに迷走日付を入れ、本文に根拠が無いときは当日にする。
+ * 行動ログ: モデルが date や summary に迷走日付を入れても、ユーザー入力に根拠がなければ当日にする。
  * （家計簿はレシートの日付が summary/備考に出ないことがあり、このロジックを掛けると壊れる）
  */
-function useTodayUnlessDateAppearsInText(r: AnalysisResult): AnalysisResult {
+function useTodayUnlessDateAppearsInText(
+  r: AnalysisResult,
+  opts?: PostprocessOptions
+): AnalysisResult {
   if (r.category !== "log") return r;
+  const userSrc = opts?.sourceText?.trim() ?? "";
+  if (userSrc.length > 0) {
+    if (!textSuggestsCalendarOrRelativeDate(userSrc)) {
+      return { ...r, date: jstYmdToday() };
+    }
+    return r;
+  }
   const bucket = [
     r.summary,
     ...Object.values(r.fields).map((v) => (v == null ? "" : String(v))),
@@ -269,8 +284,11 @@ function compressKakeiboBikouField(r: AnalysisResult): AnalysisResult {
  * 金額は「概要が長いとき」備考へ移す前に拾い、移した後にもう一度拾う（順序バグ防止）。
  * 備考はレシートの羅列を短くする（金額拾いのあと）。
  */
-export function postprocessKakeiboForSave(r: AnalysisResult): AnalysisResult {
-  const withDate = useTodayUnlessDateAppearsInText(ensureAnalysisDate(r));
+export function postprocessKakeiboForSave(
+  r: AnalysisResult,
+  opts?: PostprocessOptions
+): AnalysisResult {
+  const withDate = useTodayUnlessDateAppearsInText(ensureAnalysisDate(r), opts);
   const afterPet = fillPetCostIfMissing(withDate);
   const afterAmount1 = fillKakeiboAmountIfMissing(afterPet);
   const afterSummary = normalizeKakeiboShortSummary(afterAmount1);
