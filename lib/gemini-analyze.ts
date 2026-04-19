@@ -45,7 +45,7 @@ export function friendlyGeminiErrorMessage(err: unknown): string {
       raw
     )
   ) {
-    return "解析がサーバーの制限時間内に終わりませんでした。画像は小さめ（目安 2MB 以下）にするか、テキストだけで試してから再度お試しください。";
+    return "解析がサーバーの制限時間内に終わりませんでした。しばらくしてから再度お試しください。テキストだけでも解析できます。";
   }
   if (raw.length > 800) {
     return `${raw.slice(0, 800)}…`;

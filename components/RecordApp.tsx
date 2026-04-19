@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { shrinkImageFileForUpload } from "@/lib/shrink-image-for-upload";
 import type { AnalysisResult, InputMode, RecentEntry } from "@/lib/types";
 
 const TABS: { mode: InputMode; label: string }[] = [
@@ -130,10 +131,14 @@ export default function RecordApp() {
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), 120_000);
     try {
+      let imageToSend: File | null = file;
+      if (file) {
+        imageToSend = await shrinkImageFileForUpload(file);
+      }
       const fd = new FormData();
       fd.set("mode", mode);
       fd.set("text", text);
-      if (file) fd.set("image", file);
+      if (imageToSend) fd.set("image", imageToSend);
       const res = await fetch("/api/analyze", {
         method: "POST",
         body: fd,
@@ -145,7 +150,7 @@ export default function RecordApp() {
       } catch {
         throw new Error(
           res.status === 504 || res.status === 502
-            ? "サーバーが応答に時間がかかりすぎました。画像を小さくするか、あとでもう一度試してください。"
+            ? "サーバーが応答に時間がかかりすぎました。あとでもう一度試してください。"
             : "サーバーからの応答を読み取れませんでした。"
         );
       }
@@ -154,7 +159,7 @@ export default function RecordApp() {
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") {
         setError(
-          "解析が2分以内に終わりませんでした。画像を小さくするか、テキストだけで試してからもう一度お試しください。"
+          "解析が2分以内に終わりませんでした。電波を確認するか、あとでもう一度お試しください。"
         );
       } else if (e instanceof TypeError) {
         setError(
@@ -245,8 +250,7 @@ export default function RecordApp() {
           画像（レシート・領収書）
         </label>
         <p className="text-xs text-zinc-500">
-          大きい写真は失敗しやすいです。目安{" "}
-          <span className="font-medium">3MB 以下</span>（スクショや画質を下げた写真）を推奨します。
+          撮影したままで大丈夫です。送る直前にこの端末の中だけで自動的に縮小します（レシートの文字も読み取りやすいサイズに調整）。
         </p>
         <input
           type="file"
@@ -282,7 +286,7 @@ export default function RecordApp() {
           <p className="text-center text-xs leading-relaxed text-zinc-500">
             サーバーで AI が処理しています。混雑時は{" "}
             <span className="font-medium text-zinc-600">1分前後</span>
-            かかることがあります。画像は小さいほど早く終わりやすいです。
+            かかることがあります。
           </p>
         )}
       </section>
