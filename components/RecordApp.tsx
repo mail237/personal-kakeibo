@@ -56,6 +56,20 @@ export default function RecordApp() {
   const [recordsError, setRecordsError] = useState<string | null>(null);
   const [recordsEmptyHint, setRecordsEmptyHint] = useState<string | null>(null);
   const [recordsBusy, setRecordsBusy] = useState(false);
+  /** 解析中に経過秒を出す（待ち時間が長いとフリーズに見えるため） */
+  const [analyzeElapsedSec, setAnalyzeElapsedSec] = useState(0);
+
+  useEffect(() => {
+    if (busy !== "analyze") {
+      setAnalyzeElapsedSec(0);
+      return;
+    }
+    setAnalyzeElapsedSec(0);
+    const id = window.setInterval(() => {
+      setAnalyzeElapsedSec((s) => s + 1);
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [busy]);
 
   const loadRecords = useCallback(async () => {
     setRecordsBusy(true);
@@ -244,10 +258,33 @@ export default function RecordApp() {
           type="button"
           onClick={() => void onAnalyze()}
           disabled={busy !== null}
+          aria-busy={busy === "analyze"}
           className="mt-2 w-full rounded-xl bg-emerald-600 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 disabled:opacity-50"
         >
-          {busy === "analyze" ? "解析中…" : "AI で解析"}
+          {busy === "analyze" ? (
+            <span className="inline-flex w-full items-center justify-center gap-2">
+              <span
+                className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-white border-t-transparent"
+                aria-hidden
+              />
+              <span>
+                解析中…
+                {analyzeElapsedSec > 0
+                  ? `（${analyzeElapsedSec}秒）`
+                  : ""}
+              </span>
+            </span>
+          ) : (
+            "AI で解析"
+          )}
         </button>
+        {busy === "analyze" && (
+          <p className="text-center text-xs leading-relaxed text-zinc-500">
+            サーバーで AI が処理しています。混雑時は{" "}
+            <span className="font-medium text-zinc-600">1分前後</span>
+            かかることがあります。画像は小さいほど早く終わりやすいです。
+          </p>
+        )}
       </section>
 
       {error && (
