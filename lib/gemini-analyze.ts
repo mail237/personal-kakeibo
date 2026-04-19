@@ -17,6 +17,19 @@ const GEMINI_MODEL_FALLBACKS = [
   "gemini-1.5-flash",
 ] as const;
 
+/**
+ * 画像は入力トークンが重く、Vercel の関数上限（多くの環境で 60 秒前後）に収める必要がある。
+ * 長く待つより短いタイムアウトで次モデルへ切り替える（テキストは従来の長めループのまま）。
+ */
+const GEMINI_VISION_MODEL_FALLBACKS = [
+  "gemini-2.5-flash-lite",
+  "gemini-2.0-flash-lite",
+  "gemini-2.5-flash",
+] as const;
+
+const VISION_REQUEST_TIMEOUT_MS = 19_000;
+const VISION_MAX_MODEL_ATTEMPTS = 3;
+
 function shouldTryNextModel(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
   return /404|429|502|503|504|408|quota|Quota|not found|NOT_FOUND|RESOURCE_EXHAUSTED|Service Unavailable|high demand|experiencing high demand|overloaded|UNAVAILABLE|try again later|deadline|timeout|timed out|ETIMEDOUT|ECONNRESET|EPIPE|ENOTFOUND|fetch failed|network|socket|aborted|UND_ERR|Bad Gateway|Gateway/i.test(
@@ -108,6 +121,38 @@ async function withGeminiModelFallback<T>(
   }
   if (lastErr instanceof Error) throw lastErr;
   throw new Error(String(lastErr));
+}
+
+async function withGeminiVisionFallback<T>(
+  run: (
+    modelId: string,
+    requestOptions: { timeout: number }
+  ) => Promise<T>
+): Promise<T> {
+  const explicit = process.env.GEMINI_MODEL?.trim();
+  const base = [...GEMINI_VISION_MODEL_FALLBACKS];
+  const ordered: string[] = explicit
+    ? [explicit, ...base.filter((id) => id !== explicit)]
+    : base;
+  const tryOrder = ordered.slice(0, VISION_MAX_MODEL_ATTEMPTS);
+
+  for (const id of tryOrder) {
+    try {
+      return await run(id, { timeout: VISION_REQUEST_TIMEOUT_MS });
+    } catch (e) {
+      if (shouldTryNextModel(e) && id !== tryOrder[tryOrder.length - 1]) {
+        const fromApi = retryAfterMsFromGeminiError(e);
+        const waitMs = Math.min(
+          fromApi ?? (isQuotaOrRateLimit(e) ? 2000 : 280),
+          2200
+        );
+        await sleep(waitMs);
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw new Error("画像解析に失敗しました。");
 }
 
 function getClient() {
@@ -470,13 +515,14 @@ export async function analyzeImage(
 ): Promise<AnalysisResult> {
   if (!base64) throw new Error("画像データがありません。");
 
-  return withGeminiModelFallback(async (modelId) => {
+  return withGeminiVisionFallback(async (modelId, requestOptions) => {
     const genAI = getClient();
     const model = genAI.getGenerativeModel({
       model: modelId,
       generationConfig: {
         responseMimeType: "application/json",
         temperature: 0.2,
+        maxOutputTokens: 2048,
       },
     });
 
@@ -487,10 +533,10 @@ export async function analyzeImage(
       },
     };
 
-    const result = await model.generateContent([
-      buildImagePrompt(mode, hint),
-      imagePart,
-    ]);
+    const result = await model.generateContent(
+      [buildImagePrompt(mode, hint), imagePart],
+      requestOptions
+    );
     const out = result.response.text();
     const parsed = parseModelJsonText(out);
     return applyModeOverrides(mode, normalizeResult(parsed, mode));

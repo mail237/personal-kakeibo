@@ -3,10 +3,11 @@
  * API の上限（約 3.2MB）とアップロード時間を抑える。
  */
 
-const TARGET_MAX_BYTES = 2_500_000;
+const TARGET_MAX_BYTES = 2_200_000;
 const SKIP_IF_SMALLER_THAN = 650_000;
 
-const LONG_EDGES = [1920, 1600, 1280, 1024, 896] as const;
+/** 長辺を抑えて API・Gemini の待ち時間を短くする（レシートは 1600 で十分読めることが多い） */
+const LONG_EDGES = [1600, 1280, 1024, 896, 768] as const;
 const JPEG_QUALITIES = [0.88, 0.8, 0.72, 0.64, 0.56, 0.48, 0.4] as const;
 
 function baseNameFromFile(name: string): string {

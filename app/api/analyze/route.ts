@@ -8,7 +8,7 @@ import {
 import type { InputMode } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
-/** Gemini＋画像は数秒〜数十秒かかる。Vercel の既定 10 秒だと切れるため延長（Hobby は最大 10 のままのことあり） */
+/** Gemini＋画像は数秒〜数十秒。Hobby も含め多くの環境で上限に近いため 60 秒設定（画像は短タイムアウトで複数モデル試行） */
 export const maxDuration = 60;
 export const runtime = "nodejs";
 
