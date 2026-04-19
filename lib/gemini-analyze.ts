@@ -235,9 +235,13 @@ ${hintBlock}
 ${modeInstruction(mode)}
 
 fields のルールはテキスト解析と同じです（kakeibo / pet / log それぞれ）。
-レシートなら通常 kakeibo。動物病院なら pet。**pet のときも診療費の数値は必ず fields.cost に入れる（請求書 JSON なら total_amount や支払額を cost に反映。0 のみは禁止）。**
+${
+  mode === "log"
+    ? `**ユーザーは行動ログタブを選んでいます。画像がレシート・領収書でも category は必ず "log"。家計簿（kakeibo）や pet にしない。** 金額や店名は「買った記録」として fields.content / tags に書き、fields.time にレシート上の時刻があれば入れる（なければ空でよい）。summary は短い見出し（例: コンビニ、書店）。`
+    : `レシートなら通常 kakeibo。動物病院なら pet。**pet のときも診療費の数値は必ず fields.cost に入れる（請求書 JSON なら total_amount や支払額を cost に反映。0 のみは禁止）。**
 kakeibo では金額は fields.amount に数値（円）を入れる。請求書・領収書に total_amount や保険控除後の支払額があるときはそれを優先（小計だけにしない）。fields.bikou は店名＋簡単なメモ程度（レシートの行ごとの羅列は禁止）。
-行動ログでは fields.time をスプレッドシートの「時間」列にそのまま保存する（例 10:00〜11:00）。入力に「9時から11時」「10:30」などがあるときは必ず time に入れる。詳細は fields.content / tags に（時間の繰り返しは避ける）。
+行動ログでは fields.time をスプレッドシートの「時間」列にそのまま保存する（例 10:00〜11:00）。入力に「9時から11時」「10:30」などがあるときは必ず time に入れる。詳細は fields.content / tags に（時間の繰り返しは避ける）。`
+}
 
 重要: store_name / items / total だけの別形式の JSON に置き換えないでください。必ず上記の category・date・fields・summary をトップレベルに含めてください（レシートでも同じ）。`;
 }
@@ -454,6 +458,50 @@ function normalizeResult(raw: unknown, mode: InputMode): AnalysisResult {
   };
 }
 
+/**
+ * タブで「行動ログ」を選んだのにモデルが家計簿等にしたとき、シートは行動ログへ。
+ * 金額・備考などは content に寄せて失わない。
+ */
+function remapMisclassifiedToLog(r: AnalysisResult): AnalysisResult {
+  const f = { ...r.fields };
+  const chunks: string[] = [];
+  const push = (s: string) => {
+    const t = s.trim();
+    if (t && !chunks.includes(t)) chunks.push(t);
+  };
+  push(String(f.content ?? ""));
+  push(String(f.bikou ?? ""));
+  push(String(f.memo ?? ""));
+  if (r.category === "pet") {
+    push(String(f.hospital ?? ""));
+    const c = f.cost;
+    if (c != null && Number(c) > 0) push(`${c}円`);
+  }
+  if (r.category === "kakeibo") {
+    const a = f.amount;
+    if (a != null && Number(a) > 0) push(`${a}円`);
+    push(String(f.category ?? ""));
+  }
+  let summary = r.summary.trim().replace(/^\[[^\]]+\]\s*/, "").trim();
+  if (!summary) summary = (chunks[0] ?? "").trim();
+  if (!summary) summary = "記録";
+  if (summary.length > 120) summary = `${summary.slice(0, 117)}…`;
+
+  return {
+    category: "log",
+    date: r.date,
+    summary,
+    fields: {
+      time: String(f.time ?? "").trim(),
+      content:
+        chunks.join(" · ").slice(0, 3500) ||
+        summary ||
+        "（内容なし）",
+      tags: String(f.tags ?? "").trim(),
+    },
+  };
+}
+
 function applyModeOverrides(mode: InputMode, r: AnalysisResult): AnalysisResult {
   if (mode === "medical") {
     const detail =
@@ -478,6 +526,16 @@ function applyModeOverrides(mode: InputMode, r: AnalysisResult): AnalysisResult 
       fields: { ...r.fields, category: "塾関係", bikou: detail },
       summary: "[塾関係]",
     };
+  }
+  if (mode === "log") {
+    if (r.category === "log") return { ...r, category: "log" };
+    return remapMisclassifiedToLog(r);
+  }
+  if (mode === "pet") {
+    return { ...r, category: "pet" };
+  }
+  if (mode === "kakeibo") {
+    return { ...r, category: "kakeibo" };
   }
   return r;
 }
