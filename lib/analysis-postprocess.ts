@@ -165,6 +165,63 @@ function extractYenFromJapaneseText(text: string): number | null {
   return null;
 }
 
+/**
+ * 行動ログの C 列用。ユーザーが書いた時間が content にだけあるとき fields.time に移す。
+ */
+function extractLogTimeRange(text: string): string | null {
+  const s = text.replace(/\u3000/g, " ").trim();
+  if (!s) return null;
+  let m: RegExpExecArray | null;
+
+  m = /(\d{1,2}:\d{2})\s*[-–—〜~～]\s*(\d{1,2}:\d{2})/.exec(s);
+  if (m) return `${m[1]}〜${m[2]}`;
+
+  m =
+    /(\d{1,2})\s*時(?:\s*(\d{1,2})\s*分)?\s*から\s*(\d{1,2})\s*時(?:\s*(\d{1,2})\s*分)?/.exec(
+      s
+    );
+  if (m) {
+    const h1 = m[1];
+    const min1 = m[2] ?? "0";
+    const h2 = m[3];
+    const min2 = m[4] ?? "0";
+    return `${h1}:${String(Number(min1)).padStart(2, "0")}〜${h2}:${String(Number(min2)).padStart(2, "0")}`;
+  }
+
+  m = /(\d{1,2})\s*時\s*[-〜~～]\s*(\d{1,2})\s*時/.exec(s);
+  if (m) return `${m[1]}:00〜${m[2]}:00`;
+
+  m = /(^|[\s。、])(\d{1,2}:\d{2})(?=[\s。、]|$)/.exec(s);
+  if (m) return m[2];
+
+  return null;
+}
+
+function fillLogTimeIfMissing(
+  r: AnalysisResult,
+  opts?: PostprocessOptions
+): AnalysisResult {
+  if (r.category !== "log") return r;
+  const existing = String(r.fields.time ?? "").trim();
+  if (existing) return r;
+  const src = opts?.sourceText?.trim() ?? "";
+  const content = String(r.fields.content ?? "").trim();
+  const tags = String(r.fields.tags ?? "").trim();
+  const fromSrc = extractLogTimeRange(src);
+  if (fromSrc) {
+    return { ...r, fields: { ...r.fields, time: fromSrc } };
+  }
+  const fromContent = extractLogTimeRange(content);
+  if (fromContent) {
+    return { ...r, fields: { ...r.fields, time: fromContent } };
+  }
+  const fromTags = extractLogTimeRange(tags);
+  if (fromTags) {
+    return { ...r, fields: { ...r.fields, time: fromTags } };
+  }
+  return r;
+}
+
 /** ペット記録は GAS が fields.cost のみ参照するため、未設定時は本文から拾う */
 function fillPetCostIfMissing(r: AnalysisResult): AnalysisResult {
   if (r.category !== "pet") return r;
@@ -344,7 +401,8 @@ export function postprocessKakeiboForSave(
   opts?: PostprocessOptions
 ): AnalysisResult {
   const withDate = resolveAnalysisDateFromUser(ensureAnalysisDate(r), opts);
-  const afterPet = fillPetCostIfMissing(withDate);
+  const afterLogTime = fillLogTimeIfMissing(withDate, opts);
+  const afterPet = fillPetCostIfMissing(afterLogTime);
   const afterAmount1 = fillKakeiboAmountIfMissing(afterPet);
   const afterSummary = normalizeKakeiboShortSummary(afterAmount1);
   const afterAmount2 = fillKakeiboAmountIfMissing(afterSummary);
