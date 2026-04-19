@@ -177,7 +177,13 @@ function normalizeKakeiboRowForSheet_(analysis) {
     var short = "[" + m[1] + "]";
     var rest = sum.replace(/^\[[^\]]+\]\s*/, "").trim();
     if (rest) {
-      bikou = bikou ? bikou + "\n" + rest : rest;
+      var bTrim = String(bikou).trim();
+      var rTrim = String(rest).trim();
+      if (bTrim && rTrim && (bTrim.indexOf(rTrim) >= 0 || rTrim.indexOf(bTrim) >= 0)) {
+        bikou = bTrim.length >= rTrim.length ? bTrim : rTrim;
+      } else {
+        bikou = bTrim ? bTrim + "\n" + rTrim : rTrim;
+      }
     }
     sum = short;
   }

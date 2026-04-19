@@ -226,6 +226,21 @@ function normalizeSummaryBracketsForKakeibo(summary: string): string {
     .replace(/\uFF3D/g, "]");
 }
 
+/** 概要の残りと備考を足すとき、一方が他方に含まれる重複（店名2行）を避ける */
+function mergeKakeiboBikouNoRedundantLine(
+  existing: string,
+  fromSummary: string
+): string {
+  const a = existing.trim();
+  const b = fromSummary.trim();
+  if (!b) return a;
+  if (!a) return b;
+  if (a.includes(b) || b.includes(a)) {
+    return a.length >= b.length ? a : b;
+  }
+  return `${a}\n${b}`.trim();
+}
+
 /**
  * 家計簿: 概要は必ず [カテゴリ] のみ。長文は summary から備考へ移す（GAS の normalize と同趣旨）
  */
@@ -250,7 +265,7 @@ function normalizeKakeiboShortSummary(r: AnalysisResult): AnalysisResult {
         },
       };
     }
-    const bikou = [existingBikou, rest].filter(Boolean).join("\n").trim();
+    const bikou = mergeKakeiboBikouNoRedundantLine(existingBikou, rest);
     return {
       ...r,
       summary: short,
@@ -268,7 +283,7 @@ function normalizeKakeiboShortSummary(r: AnalysisResult): AnalysisResult {
     fields: {
       ...r.fields,
       category: fallbackCat,
-      bikou: [existingBikou, sum].filter(Boolean).join("\n").trim(),
+      bikou: mergeKakeiboBikouNoRedundantLine(existingBikou, sum),
     },
   };
 }
