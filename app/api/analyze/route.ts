@@ -8,8 +8,14 @@ import {
 import type { InputMode } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
+/** Gemini＋画像は数秒〜数十秒かかる。Vercel の既定 10 秒だと切れるため延長（Hobby は最大 10 のままのことあり） */
+export const maxDuration = 60;
+export const runtime = "nodejs";
 
 const MODES: InputMode[] = ["auto", "kakeibo", "medical", "juku", "pet", "log"];
+
+/** Vercel のリクエスト上限付近で落ちるのを防ぐ（base64 前のバイナリ長） */
+const MAX_IMAGE_BYTES = 3_200_000;
 
 export async function POST(req: NextRequest) {
   try {
@@ -31,6 +37,14 @@ export async function POST(req: NextRequest) {
     const file = form.get("image");
 
     if (file instanceof File && file.size > 0) {
+      if (file.size > MAX_IMAGE_BYTES) {
+        return NextResponse.json(
+          {
+            error: `画像が大きすぎます（${Math.round(file.size / 1_000_000)}MB）。${Math.round(MAX_IMAGE_BYTES / 1_000_000)}MB 以下に縮小するか、画質を下げてから送ってください。`,
+          },
+          { status: 413 }
+        );
+      }
       const buf = Buffer.from(await file.arrayBuffer());
       const base64 = buf.toString("base64");
       const mime = file.type || "image/jpeg";

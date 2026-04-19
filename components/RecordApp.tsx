@@ -113,18 +113,44 @@ export default function RecordApp() {
       return;
     }
     setBusy("analyze");
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 120_000);
     try {
       const fd = new FormData();
       fd.set("mode", mode);
       fd.set("text", text);
       if (file) fd.set("image", file);
-      const res = await fetch("/api/analyze", { method: "POST", body: fd });
-      const data = await res.json();
+      const res = await fetch("/api/analyze", {
+        method: "POST",
+        body: fd,
+        signal: controller.signal,
+      });
+      let data: { error?: string; analysis?: AnalysisResult } = {};
+      try {
+        data = (await res.json()) as typeof data;
+      } catch {
+        throw new Error(
+          res.status === 504 || res.status === 502
+            ? "サーバーが応答に時間がかかりすぎました。画像を小さくするか、あとでもう一度試してください。"
+            : "サーバーからの応答を読み取れませんでした。"
+        );
+      }
       if (!res.ok) throw new Error(data.error || "解析に失敗しました");
       setPreview(data.analysis as AnalysisResult);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "エラーが発生しました");
+      if (e instanceof DOMException && e.name === "AbortError") {
+        setError(
+          "解析が2分以内に終わりませんでした。画像を小さくするか、テキストだけで試してからもう一度お試しください。"
+        );
+      } else if (e instanceof TypeError) {
+        setError(
+          "通信に失敗しました。電波・Wi-Fi を確認するか、しばらくしてから再度お試しください。"
+        );
+      } else {
+        setError(e instanceof Error ? e.message : "エラーが発生しました");
+      }
     } finally {
+      window.clearTimeout(timeoutId);
       setBusy(null);
     }
   }
@@ -204,6 +230,10 @@ export default function RecordApp() {
         <label className="block text-sm font-medium text-zinc-700">
           画像（レシート・領収書）
         </label>
+        <p className="text-xs text-zinc-500">
+          大きい写真は失敗しやすいです。目安{" "}
+          <span className="font-medium">3MB 以下</span>（スクショや画質を下げた写真）を推奨します。
+        </p>
         <input
           type="file"
           accept="image/*"

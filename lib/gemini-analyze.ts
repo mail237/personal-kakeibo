@@ -19,7 +19,7 @@ const GEMINI_MODEL_FALLBACKS = [
 
 function shouldTryNextModel(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
-  return /404|429|503|quota|Quota|not found|NOT_FOUND|RESOURCE_EXHAUSTED|Service Unavailable|high demand|experiencing high demand|overloaded|UNAVAILABLE|try again later/i.test(
+  return /404|429|502|503|504|408|quota|Quota|not found|NOT_FOUND|RESOURCE_EXHAUSTED|Service Unavailable|high demand|experiencing high demand|overloaded|UNAVAILABLE|try again later|deadline|timeout|timed out|ETIMEDOUT|ECONNRESET|EPIPE|ENOTFOUND|fetch failed|network|socket|aborted|UND_ERR|Bad Gateway|Gateway/i.test(
     msg
   );
 }
@@ -39,6 +39,13 @@ export function friendlyGeminiErrorMessage(err: unknown): string {
     /exceeded your current quota|check your plan and billing|FreeTier|billing details/i.test(raw)
   ) {
     return "Gemini の利用枠に達しました（無料枠の1日あたり上限など）。しばらく待つか、Google AI Studio で課金を有効にするか、別プロジェクトの API キーを試してください。https://aistudio.google.com/";
+  }
+  if (
+    /504|502|FUNCTION_INVOCATION_TIMEOUT|Vercel|Gateway Timeout|timeout was reached|HeadersTimeoutError|BodyTimeoutError/i.test(
+      raw
+    )
+  ) {
+    return "解析がサーバーの制限時間内に終わりませんでした。画像は小さめ（目安 2MB 以下）にするか、テキストだけで試してから再度お試しください。";
   }
   if (raw.length > 800) {
     return `${raw.slice(0, 800)}…`;
@@ -77,8 +84,8 @@ async function withGeminiModelFallback<T>(
     : base;
   let lastErr: unknown;
 
-  /** 全モデル失敗時に少し待ってもう一周（混雑・429 の連続向け） */
-  for (let round = 0; round < 3; round++) {
+  /** 全モデル失敗時に少し待ってもう一周（混雑・429・一時的なネットワーク向け） */
+  for (let round = 0; round < 4; round++) {
     if (round > 0) {
       await sleep(2800);
     }
