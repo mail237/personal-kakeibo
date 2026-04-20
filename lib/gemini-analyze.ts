@@ -1,7 +1,14 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
-import type { AnalysisCategory, InputMode } from "./types";
+import {
+  GoogleGenerativeAI,
+  GoogleGenerativeAIFetchError,
+} from "@google/generative-ai";
+import type {
+  GenerateContentResult,
+  GenerativeModel,
+  SingleRequestOptions,
+} from "@google/generative-ai";
+import type { AnalysisCategory, AnalysisResult, InputMode } from "./types";
 import { parseModelJsonText } from "./parse-model-json";
-import type { AnalysisResult } from "./types";
 
 /**
  * GEMINI_MODEL を指定しない場合、無料枠やリージョンで使えるモデルが違うため
@@ -84,6 +91,42 @@ function retryAfterMsFromGeminiError(err: unknown): number | null {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+/** レート制限（HTTP 429）のとき 3 秒待って同じリクエストを最大 3 回まで再試行 */
+const RATE_LIMIT_429_MAX_RETRIES = 3;
+const RATE_LIMIT_429_WAIT_MS = 3000;
+
+function isRetryableRateLimit429(err: unknown): boolean {
+  if (err instanceof GoogleGenerativeAIFetchError && err.status === 429) {
+    return true;
+  }
+  const msg = err instanceof Error ? err.message : String(err);
+  return /\b429\b/.test(msg);
+}
+
+async function generateContentWith429Retries(
+  model: GenerativeModel,
+  request: Parameters<GenerativeModel["generateContent"]>[0],
+  requestOptions?: SingleRequestOptions
+): Promise<GenerateContentResult> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= RATE_LIMIT_429_MAX_RETRIES; attempt++) {
+    try {
+      return await model.generateContent(request, requestOptions);
+    } catch (e) {
+      lastErr = e;
+      if (
+        attempt < RATE_LIMIT_429_MAX_RETRIES &&
+        isRetryableRateLimit429(e)
+      ) {
+        await sleep(RATE_LIMIT_429_WAIT_MS);
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
 }
 
 async function withGeminiModelFallback<T>(
@@ -214,7 +257,8 @@ fields のルール:
 
 ユーザーのテキスト:
 ${userText}
-`;
+
+【重要】必ずJSONのみ返してください。説明文・マークダウン・コードフェンスは付けないでください。`;
 }
 
 function buildImagePrompt(mode: InputMode, hint?: string): string {
@@ -243,7 +287,9 @@ kakeibo では金額は fields.amount に数値（円）を入れる。請求書
 行動ログでは fields.time をスプレッドシートの「時間」列にそのまま保存する（例 10:00〜11:00）。入力に「9時から11時」「10:30」などがあるときは必ず time に入れる。詳細は fields.content / tags に（時間の繰り返しは避ける）。`
 }
 
-重要: store_name / items / total だけの別形式の JSON に置き換えないでください。必ず上記の category・date・fields・summary をトップレベルに含めてください（レシートでも同じ）。`;
+重要: store_name / items / total だけの別形式の JSON に置き換えないでください。必ず上記の category・date・fields・summary をトップレベルに含めてください（レシートでも同じ）。
+
+【重要】必ずJSONのみ返してください。説明文・マークダウン・コードフェンスは付けないでください。`;
 }
 
 function jstYmdTokyo(d = new Date()): string {
@@ -552,12 +598,17 @@ export async function analyzeText(
     const model = genAI.getGenerativeModel({
       model: modelId,
       generationConfig: {
+        /** REST API の response_mime_type に相当 */
         responseMimeType: "application/json",
         temperature: 0.2,
+        maxOutputTokens: 2048,
       },
     });
 
-    const result = await model.generateContent(buildPrompt(mode, trimmed));
+    const result = await generateContentWith429Retries(
+      model,
+      buildPrompt(mode, trimmed)
+    );
     const response = result.response;
     const out = response.text();
     const parsed = parseModelJsonText(out);
@@ -578,6 +629,7 @@ export async function analyzeImage(
     const model = genAI.getGenerativeModel({
       model: modelId,
       generationConfig: {
+        /** REST API の response_mime_type に相当 */
         responseMimeType: "application/json",
         temperature: 0.2,
         maxOutputTokens: 2048,
@@ -591,7 +643,8 @@ export async function analyzeImage(
       },
     };
 
-    const result = await model.generateContent(
+    const result = await generateContentWith429Retries(
+      model,
       [buildImagePrompt(mode, hint), imagePart],
       requestOptions
     );

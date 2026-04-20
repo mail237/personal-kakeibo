@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { postprocessKakeiboForSave } from "@/lib/analysis-postprocess";
+import { resizeImageBufferForGemini } from "@/lib/resize-image-buffer";
 import {
   analyzeImage,
   analyzeText,
@@ -45,9 +46,12 @@ export async function POST(req: NextRequest) {
           { status: 413 }
         );
       }
-      const buf = Buffer.from(await file.arrayBuffer());
+      const rawBuf = Buffer.from(await file.arrayBuffer());
+      const { buffer: buf, mimeType: mime } = await resizeImageBufferForGemini(
+        rawBuf,
+        file.type || "image/jpeg"
+      );
       const base64 = buf.toString("base64");
-      const mime = file.type || "image/jpeg";
       const analysis = await analyzeImage(mode, base64, mime, text);
       return NextResponse.json({
         ok: true,

@@ -6,8 +6,8 @@
 const TARGET_MAX_BYTES = 2_200_000;
 const SKIP_IF_SMALLER_THAN = 650_000;
 
-/** 長辺を抑えて API・Gemini の待ち時間を短くする（レシートは 1600 で十分読めることが多い） */
-const LONG_EDGES = [1600, 1280, 1024, 896, 768] as const;
+/** 長辺 1200px 以下に収める（Gemini 送信前の上限に合わせる） */
+const LONG_EDGES = [1200, 1024, 896, 768] as const;
 const JPEG_QUALITIES = [0.88, 0.8, 0.72, 0.64, 0.56, 0.48, 0.4] as const;
 
 function baseNameFromFile(name: string): string {
@@ -102,7 +102,7 @@ function renderToCanvas(
  * 失敗時は元の File を返す（呼び出し側でそのまま送信可能）。
  */
 export async function shrinkImageFileForUpload(file: File): Promise<File> {
-  if (!file.type.startsWith("image/") || file.size <= SKIP_IF_SMALLER_THAN) {
+  if (!file.type.startsWith("image/")) {
     return file;
   }
 
@@ -110,6 +110,14 @@ export async function shrinkImageFileForUpload(file: File): Promise<File> {
   try {
     const { draw, close } = await loadDrawable(file);
     closer = close;
+
+    const { w, h } = intrinsicSize(draw);
+    const long = Math.max(w, h);
+    const needsDownscale = long > 1200;
+    const needsCompress = file.size > SKIP_IF_SMALLER_THAN;
+    if (!needsDownscale && !needsCompress) {
+      return file;
+    }
 
     for (const edge of LONG_EDGES) {
       const canvas = renderToCanvas(draw, edge);
