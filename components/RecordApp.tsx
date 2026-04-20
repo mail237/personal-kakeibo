@@ -48,8 +48,9 @@ function previewBadgeLabel(a: AnalysisResult): string {
 export default function RecordApp() {
   const [mode, setMode] = useState<InputMode>("auto");
   const [text, setText] = useState("");
-  const [file, setFile] = useState<File | null>(null);
-  const [preview, setPreview] = useState<AnalysisResult | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
+  const [previews, setPreviews] = useState<AnalysisResult[]>([]);
+  const [previewIdx, setPreviewIdx] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState<"analyze" | "save" | null>(null);
@@ -122,8 +123,9 @@ export default function RecordApp() {
     setNotice(null);
     setRecordsError(null);
     setRecordsEmptyHint(null);
-    setPreview(null);
-    if (!text.trim() && !file) {
+    setPreviews([]);
+    setPreviewIdx(0);
+    if (!text.trim() && files.length === 0) {
       setError("テキストを入力するか、画像を選んでください。");
       return;
     }
@@ -131,31 +133,37 @@ export default function RecordApp() {
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), 120_000);
     try {
-      let imageToSend: File | null = file;
-      if (file) {
-        imageToSend = await shrinkImageFileForUpload(file);
+      const list: AnalysisResult[] = [];
+      const toAnalyze = files.length > 0 ? files : [null];
+      for (const f of toAnalyze) {
+        let imageToSend: File | null = f;
+        if (f) {
+          imageToSend = await shrinkImageFileForUpload(f);
+        }
+        const fd = new FormData();
+        fd.set("mode", mode);
+        fd.set("text", text);
+        if (imageToSend) fd.set("image", imageToSend);
+        const res = await fetch("/api/analyze", {
+          method: "POST",
+          body: fd,
+          signal: controller.signal,
+        });
+        let data: { error?: string; analysis?: AnalysisResult } = {};
+        try {
+          data = (await res.json()) as typeof data;
+        } catch {
+          throw new Error(
+            res.status === 504 || res.status === 502
+              ? "サーバー側の制限時間までに終わりませんでした（写真の解析は混雑時に遅くなります）。あとでもう一度試すか、テキスト欄に店名・金額だけ書いて解析すると通りやすいです。"
+              : "サーバーからの応答を読み取れませんでした。"
+          );
+        }
+        if (!res.ok) throw new Error(data.error || "解析に失敗しました");
+        list.push(data.analysis as AnalysisResult);
       }
-      const fd = new FormData();
-      fd.set("mode", mode);
-      fd.set("text", text);
-      if (imageToSend) fd.set("image", imageToSend);
-      const res = await fetch("/api/analyze", {
-        method: "POST",
-        body: fd,
-        signal: controller.signal,
-      });
-      let data: { error?: string; analysis?: AnalysisResult } = {};
-      try {
-        data = (await res.json()) as typeof data;
-      } catch {
-        throw new Error(
-          res.status === 504 || res.status === 502
-            ? "サーバー側の制限時間までに終わりませんでした（写真の解析は混雑時に遅くなります）。あとでもう一度試すか、テキスト欄に店名・金額だけ書いて解析すると通りやすいです。"
-            : "サーバーからの応答を読み取れませんでした。"
-        );
-      }
-      if (!res.ok) throw new Error(data.error || "解析に失敗しました");
-      setPreview(data.analysis as AnalysisResult);
+      setPreviews(list);
+      setPreviewIdx(0);
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") {
         setError(
@@ -175,7 +183,8 @@ export default function RecordApp() {
   }
 
   async function onSave() {
-    if (!preview) return;
+    const current = previews[previewIdx];
+    if (!current) return;
     setError(null);
     setNotice(null);
     setRecordsError(null);
@@ -185,16 +194,23 @@ export default function RecordApp() {
       const res = await fetch("/api/save", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ analysis: preview }),
+        body: JSON.stringify({ analysis: current }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "保存に失敗しました");
       if (data.deduped === true) {
         setNotice("直前の行と同じ内容のため、重複追加はしませんでした。");
       }
-      setPreview(null);
-      setText("");
-      setFile(null);
+      const next = previews.filter((_, i) => i !== previewIdx);
+      setPreviews(next);
+      setPreviewIdx((i) => {
+        const max = Math.max(0, next.length - 1);
+        return Math.min(i, max);
+      });
+      if (next.length === 0) {
+        setText("");
+        setFiles([]);
+      }
       await loadRecords();
     } catch (e) {
       setError(e instanceof Error ? e.message : "エラーが発生しました");
@@ -255,9 +271,13 @@ export default function RecordApp() {
         <input
           type="file"
           accept="image/*"
+          multiple
           className="w-full text-sm text-zinc-600 file:mr-3 file:rounded-lg file:border-0 file:bg-emerald-600 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white"
-          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+          onChange={(e) => setFiles(Array.from(e.target.files ?? []))}
         />
+        {files.length > 0 && (
+          <p className="text-xs text-zinc-500">{files.length}枚 選択中</p>
+        )}
         <button
           type="button"
           onClick={() => void onAnalyze()}
@@ -302,24 +322,55 @@ export default function RecordApp() {
         </div>
       )}
 
-      {preview && (
+      {previews.length > 0 && (
         <section className="space-y-3 rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4">
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-xs font-semibold text-emerald-800">
+              プレビュー {previewIdx + 1} / {previews.length}
+            </div>
+            {previews.length > 1 && (
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPreviewIdx((i) => Math.max(0, i - 1))}
+                  disabled={busy !== null || previewIdx === 0}
+                  className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs text-zinc-700 disabled:opacity-50"
+                >
+                  前へ
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setPreviewIdx((i) => Math.min(previews.length - 1, i + 1))
+                  }
+                  disabled={busy !== null || previewIdx >= previews.length - 1}
+                  className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs text-zinc-700 disabled:opacity-50"
+                >
+                  次へ
+                </button>
+              </div>
+            )}
+          </div>
           <div className="flex flex-wrap items-center gap-2">
             <span className="rounded-full bg-white px-2.5 py-0.5 text-xs font-semibold text-emerald-800 ring-1 ring-emerald-200">
-              {previewBadgeLabel(preview)}
+              {previewBadgeLabel(previews[previewIdx])}
             </span>
-            <span className="text-xs text-zinc-500">{preview.date}</span>
+            <span className="text-xs text-zinc-500">
+              {previews[previewIdx].date}
+            </span>
           </div>
-          <p className="text-sm font-medium text-zinc-900">{preview.summary}</p>
-          {typeof preview.fields.bikou === "string" &&
-            preview.fields.bikou.trim() !== "" && (
+          <p className="text-sm font-medium text-zinc-900">
+            {previews[previewIdx].summary}
+          </p>
+          {typeof previews[previewIdx].fields.bikou === "string" &&
+            String(previews[previewIdx].fields.bikou).trim() !== "" && (
               <p className="text-sm leading-relaxed text-zinc-600">
                 <span className="font-medium text-zinc-500">備考</span>{" "}
-                {preview.fields.bikou}
+                {String(previews[previewIdx].fields.bikou)}
               </p>
             )}
           <pre className="max-h-48 overflow-auto rounded-lg bg-white/80 p-3 text-xs text-zinc-700 ring-1 ring-emerald-100">
-            {JSON.stringify(preview.fields, null, 2)}
+            {JSON.stringify(previews[previewIdx].fields, null, 2)}
           </pre>
           <div className="flex gap-2">
             <button
@@ -332,7 +383,10 @@ export default function RecordApp() {
             </button>
             <button
               type="button"
-              onClick={() => setPreview(null)}
+              onClick={() => {
+                setPreviews([]);
+                setPreviewIdx(0);
+              }}
               className="rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-sm text-zinc-700"
             >
               破棄
