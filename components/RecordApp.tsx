@@ -273,10 +273,37 @@ export default function RecordApp() {
           accept="image/*"
           multiple
           className="w-full text-sm text-zinc-600 file:mr-3 file:rounded-lg file:border-0 file:bg-emerald-600 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white"
-          onChange={(e) => setFiles(Array.from(e.target.files ?? []))}
+          onChange={(e) => {
+            const incoming = Array.from(e.target.files ?? []);
+            /** iOS カメラは毎回 1 枚だけ渡ることが多いので、前回選んだ枚数に追記する */
+            if (incoming.length === 0) return;
+            setFiles((prev) => {
+              const keyOf = (f: File) =>
+                `${f.name}\0${f.size}\0${f.lastModified}`;
+              const seen = new Set(prev.map(keyOf));
+              const next = [...prev];
+              for (const f of incoming) {
+                const k = keyOf(f);
+                if (seen.has(k)) continue;
+                seen.add(k);
+                next.push(f);
+              }
+              return next;
+            });
+            e.target.value = "";
+          }}
         />
         {files.length > 0 && (
-          <p className="text-xs text-zinc-500">{files.length}枚 選択中</p>
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-500">
+            <span>{files.length}枚 選択中（カメラは何度でも追加できます）</span>
+            <button
+              type="button"
+              onClick={() => setFiles([])}
+              className="rounded-lg border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-50"
+            >
+              写真をクリア
+            </button>
+          </div>
         )}
         <button
           type="button"
