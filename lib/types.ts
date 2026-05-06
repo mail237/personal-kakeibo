@@ -4,10 +4,11 @@ export type InputMode =
   | "medical"
   | "juku"
   | "pet"
-  | "log";
+  | "log"
+  | "meal";
 
 /** Gemini / プレビュー用（スプレッドシートの「塾関係」タブは kakeibo + fields.category で表す） */
-export type AnalysisCategory = "kakeibo" | "pet" | "log";
+export type AnalysisCategory = "kakeibo" | "pet" | "log" | "meal";
 
 /** 直近一覧の出所（GAS の sheet キー） */
 export type SheetCategory = AnalysisCategory | "medical" | "juku";
@@ -44,6 +45,14 @@ export type LogRow = {
   time: string;
   content: string;
   tags: string;
+};
+
+export type MealRow = {
+  date: string;
+  calories: number | string;
+  items: string;
+  details: string;
+  tags?: string;
 };
 
 export type RecentEntry = {

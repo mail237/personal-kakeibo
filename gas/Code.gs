@@ -8,6 +8,7 @@
  * タブ名（完全一致）。列はすべて A〜D の4列（1行目に見出し推奨）:
  * - 家計簿・医療・塾関係・ペット記録: A日付(YYYY-MM-DD) | B概要(短い一言) | C金額(数値のみ) | D備考
  * - 行動ログ: A日付 | B概要(短い一言) | C時間(例 10:00〜11:00) | D備考(詳細・タグ等)
+ * - 食事: A日付 | B概要(短い一言) | Cカロリー(kcal 数値) | D備考(料理・量の前提など)
  * - 家計簿で fields.category が「医療」→「医療」タブ、「塾関係」→「塾関係」タブ、それ以外→「家計簿」
  * - append は直前行と4列とも同一なら追加しない（二重送信対策）
  */
@@ -18,6 +19,7 @@ const SHEET_NAMES = {
   juku: "塾関係",
   pet: "ペット記録",
   log: "行動ログ",
+  meal: "食事",
 };
 
 function getProps_() {
@@ -57,7 +59,7 @@ function asNumber_(v) {
 function validateAnalysis_(a) {
   if (!a || typeof a !== "object") throw new Error("analysis が不正です");
   const cat = a.category;
-  if (cat !== "kakeibo" && cat !== "pet" && cat !== "log") {
+  if (cat !== "kakeibo" && cat !== "pet" && cat !== "log" && cat !== "meal") {
     throw new Error("category が不正です");
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(a.date || ""))) {
@@ -245,6 +247,23 @@ function logRemarksColumnD_(analysis) {
     .join(" / ");
 }
 
+/** 食事 C列: カロリー（kcal 数値） */
+function mealCaloriesColumnC_(analysis) {
+  var f = analysis.fields || {};
+  var n = asNumber_(f.calories);
+  return n > 0 ? Number(n) : 0;
+}
+
+/** 食事 D列: 料理・量の前提など */
+function mealRemarksColumnD_(analysis) {
+  var f = analysis.fields || {};
+  return [mustString_(f.items), mustString_(f.details), mustString_(f.tags)]
+    .filter(function (x) {
+      return x;
+    })
+    .join(" / ");
+}
+
 function normalizeCellForCompare_(v) {
   if (v == null) return "";
   if (typeof v === "number" && !isNaN(v)) return String(v);
@@ -309,6 +328,7 @@ function amountFromAnalysis_(analysis) {
 function resolveSheetName_(analysis) {
   if (analysis.category === "pet") return SHEET_NAMES.pet;
   if (analysis.category === "log") return SHEET_NAMES.log;
+  if (analysis.category === "meal") return SHEET_NAMES.meal;
   if (analysis.category !== "kakeibo") return SHEET_NAMES.kakeibo;
   var f = analysis.fields || {};
   var fc = mustString_(f.category);
@@ -356,6 +376,13 @@ function append_(analysis) {
         logTimeColumnC_(analysis),
         logRemarksColumnD_(analysis),
       ];
+    } else if (analysis.category === "meal") {
+      row = [
+        analysis.date,
+        briefSummaryForSheet_(mustString_(analysis.summary)),
+        mealCaloriesColumnC_(analysis),
+        mealRemarksColumnD_(analysis),
+      ];
     } else {
       throw new Error("category が不正です");
     }
@@ -397,6 +424,7 @@ function recent_(limitPerSheet) {
     { key: "juku", label: "塾関係" },
     { key: "pet", label: "ペット" },
     { key: "log", label: "行動ログ" },
+    { key: "meal", label: "食事" },
   ];
 
   order.forEach((o) => {
@@ -414,7 +442,7 @@ function recent_(limitPerSheet) {
     }
     const startRow = Math.max(2, lastRow - limit + 1);
     const numRows = lastRow - startRow + 1;
-    // A〜D（行動ログのみ C が「時間」。それ以外は C が金額）
+    // A〜D（行動ログのみ C が「時間」。食事は C が kcal。それ以外は C が金額）
     const values = sheet.getRange(startRow, 1, numRows, 4).getValues();
     values
       .slice()

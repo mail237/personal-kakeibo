@@ -11,11 +11,13 @@ const TABS: { mode: InputMode; label: string }[] = [
   { mode: "juku", label: "塾関係" },
   { mode: "pet", label: "ペット記録" },
   { mode: "log", label: "行動ログ" },
+  { mode: "meal", label: "食事" },
 ];
 
 function categoryLabel(c: AnalysisResult["category"]): string {
   if (c === "kakeibo") return "家計簿";
   if (c === "pet") return "ペット記録";
+  if (c === "meal") return "食事";
   return "行動ログ";
 }
 
@@ -26,6 +28,11 @@ function formatRecentSubline(e: RecentEntry): string {
   const c = cells[2] ?? "";
   if (e.sheet === "log") {
     if (c !== "") parts.push(String(c));
+  } else if (e.sheet === "meal") {
+    if (c !== "") {
+      const n = Number(String(c).replace(/,/g, ""));
+      parts.push(Number.isFinite(n) && n !== 0 ? `${n}kcal` : String(c));
+    }
   } else if (c !== "") {
     const n = Number(String(c).replace(/,/g, ""));
     parts.push(Number.isFinite(n) && n !== 0 ? `¥${n}` : String(c));

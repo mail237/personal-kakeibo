@@ -10,7 +10,8 @@ function isValidAnalysis(body: unknown): body is AnalysisResult {
   if (!body || typeof body !== "object") return false;
   const o = body as Record<string, unknown>;
   const cat = o.category;
-  if (cat !== "kakeibo" && cat !== "pet" && cat !== "log") return false;
+  if (cat !== "kakeibo" && cat !== "pet" && cat !== "log" && cat !== "meal")
+    return false;
   if (o.date != null && typeof o.date !== "string") return false;
   if (!o.fields || typeof o.fields !== "object" || Array.isArray(o.fields))
     return false;

@@ -13,7 +13,15 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 export const runtime = "nodejs";
 
-const MODES: InputMode[] = ["auto", "kakeibo", "medical", "juku", "pet", "log"];
+const MODES: InputMode[] = [
+  "auto",
+  "kakeibo",
+  "medical",
+  "juku",
+  "pet",
+  "log",
+  "meal",
+];
 
 /** Vercel のリクエスト上限付近で落ちるのを防ぐ（base64 前のバイナリ長） */
 const MAX_IMAGE_BYTES = 3_200_000;

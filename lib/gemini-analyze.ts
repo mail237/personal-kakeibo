@@ -209,7 +209,8 @@ function modeInstruction(mode: InputMode): string {
     return `次のいずれかに分類してください。
 - kakeibo: 支出・収入・レシート・買い物など金銭の記録
 - pet: 動物病院・ワクチン・フード・しつけ・体調などペット関連
-- log: 作業時間・習慣・日記・TODO 完了など行動・ログ系`;
+- log: 作業時間・習慣・日記・TODO 完了など行動・ログ系
+- meal: 食事の写真・献立・料理など、カロリー推定をしたいもの`;
   }
   if (mode === "medical") {
     return `ユーザーは手動で「医療」を選びました。必ず category は "kakeibo" にし、fields.category は必ず "医療" に固定してください。summary は必ず "[医療]" のみ（短い見出しだけ）。詳細はすべて fields.bikou（備考）に書いてください。`;
@@ -217,15 +218,20 @@ function modeInstruction(mode: InputMode): string {
   if (mode === "juku") {
     return `ユーザーは手動で「塾関係」を選びました。必ず category は "kakeibo" にし、fields.category は必ず "塾関係" に固定してください。summary は必ず "[塾関係]" のみ（短い見出しだけ）。詳細はすべて fields.bikou（備考）に書いてください。`;
   }
-  const map: Record<Exclude<InputMode, "auto" | "medical" | "juku">, AnalysisCategory> = {
+  const map: Record<
+    Exclude<InputMode, "auto" | "medical" | "juku">,
+    AnalysisCategory
+  > = {
     kakeibo: "kakeibo",
     pet: "pet",
     log: "log",
+    meal: "meal",
   };
   const labels: Record<Exclude<InputMode, "auto" | "medical" | "juku">, string> = {
     kakeibo: "家計簿",
     pet: "ペット記録",
     log: "行動ログ",
+    meal: "食事",
   };
   const fixed = map[mode];
   return `ユーザーは手動で「${labels[mode]}」を選びました。category は必ず "${fixed}" に固定してください。内容が多少ズレていてもこの category を守ってください。`;
@@ -235,7 +241,7 @@ function buildPrompt(mode: InputMode, userText: string): string {
   return `あなたは個人用の記録アシスタントです。入力を解析し、次の JSON 形だけを返してください（キー名は必ず英語のまま）。
 
 {
-  "category": "kakeibo" | "pet" | "log",
+  "category": "kakeibo" | "pet" | "log" | "meal",
   "date": "YYYY-MM-DD（ユーザーが日付を書いていない・曖昧なときは必ず今日の日付。日本時間）",
   "fields": { ... },
   "summary": "概要欄用の短い見出しのみ（例: [飲食] または [交通費]。長文・店名・レシートの詳細は書かない）"
@@ -248,6 +254,7 @@ fields のルール:
   { "shubetsu": "支出|収入|その他", "amount": 数値（円、不明なら0）, "category": "飲食|食費|交通費|医療|塾関係|ペット費|日用品|通信|光熱費|住居|交際|娯楽|その他", "bikou": "備考は短く（店名＋一言でよい。レシートの住所・皿別明細・税の内訳・伝票番号などの全文は書かない）" }
 - category が pet のとき: { "content": "内容（詳細）", "hospital": "病院名（なければ空文字）", "cost": 数値（円、不明なら0）, "nextDue": "次回予定（なければ空文字）" } ／ summary は短く（例: [ペット]）でよい ／ **動物病院・請求書では cost に実負担額（total_amount やお支払額）を必ず入れる（0 のままにしない）**
 - category が log のとき: { "time": "時間帯（スプレッドシートのC列。例 10:00〜11:00 または 10:28。ユーザーが時間を書いたら必ずここに入れる）", "content": "詳細・場所（D列の備考。時間帯は time に書き、content にだけ書かない）", "tags": "カンマ区切りタグ（D列に続けて書く）" } ／ summary は短い見出しのみ（例: 散歩、勉強）。 ／ **ユーザーが日付を書いていなければ date は必ず今日（日本時間）。過去の日を勝手に埋めない**
+- category が meal のとき: { "calories": 数値（kcal。不明なら0）, "items": "料理名・献立（短く）", "details": "量の前提・内訳（例: ご飯150g / 唐揚げ5個 など）", "tags": "任意のタグ（カンマ区切り）" } ／ summary は短い見出し（例: 朝食、昼食、夕食、間食、または料理名）。カロリーは必ず calories に入れる（details にだけ書かない）
 
 家計簿カテゴリの補足ルール:
 - 書籍 / 本 / 参考書 / 問題集 / 教材 / 学習アプリなど「勉強に使う購入」は、原則 category を "塾関係" にしてください。
@@ -270,7 +277,7 @@ function buildImagePrompt(mode: InputMode, hint?: string): string {
 ${hintBlock}
 
 {
-  "category": "kakeibo" | "pet" | "log",
+  "category": "kakeibo" | "pet" | "log" | "meal",
   "date": "YYYY-MM-DD（入力に日付がない場合は今日・日本時間）",
   "fields": { ... },
   "summary": "概要欄用の短い見出しのみ（例: [飲食]）。詳細は fields.bikou（家計簿）または各カテゴリの content などへ"
@@ -285,6 +292,12 @@ ${
     : `レシートなら通常 kakeibo。動物病院なら pet。**pet のときも診療費の数値は必ず fields.cost に入れる（請求書 JSON なら total_amount や支払額を cost に反映。0 のみは禁止）。**
 kakeibo では金額は fields.amount に数値（円）を入れる。請求書・領収書に total_amount や保険控除後の支払額があるときはそれを優先（小計だけにしない）。fields.bikou は店名＋簡単なメモ程度（レシートの行ごとの羅列は禁止）。
 行動ログでは fields.time をスプレッドシートの「時間」列にそのまま保存する（例 10:00〜11:00）。入力に「9時から11時」「10:30」などがあるときは必ず time に入れる。詳細は fields.content / tags に（時間の繰り返しは避ける）。`
+}
+
+${
+  mode === "meal"
+    ? `\n**ユーザーは食事タブを選んでいます。category は必ず \"meal\"。** 食事写真からおおまかなカロリー（kcal）を推定し、fields.calories に数値で入れる。料理名は fields.items、量の前提や内訳は fields.details。`
+    : ""
 }
 
 重要: store_name / items / total だけの別形式の JSON に置き換えないでください。必ず上記の category・date・fields・summary をトップレベルに含めてください（レシートでも同じ）。
@@ -303,7 +316,8 @@ function jstYmdTokyo(d = new Date()): string {
 
 function looksLikeStandardAnalysis(o: Record<string, unknown>): boolean {
   const cat = o.category;
-  if (cat !== "kakeibo" && cat !== "pet" && cat !== "log") return false;
+  if (cat !== "kakeibo" && cat !== "pet" && cat !== "log" && cat !== "meal")
+    return false;
   const fields = o.fields;
   if (!fields || typeof fields !== "object" || Array.isArray(fields)) return false;
   if (typeof o.summary !== "string" || !o.summary.trim()) return false;
@@ -483,7 +497,7 @@ function normalizeResult(raw: unknown, mode: InputMode): AnalysisResult {
   }
 
   const cat = o.category;
-  if (cat !== "kakeibo" && cat !== "pet" && cat !== "log") {
+  if (cat !== "kakeibo" && cat !== "pet" && cat !== "log" && cat !== "meal") {
     throw new Error(`category が不正です: ${String(cat)}`);
   }
   let date = typeof o.date === "string" ? o.date.trim() : "";
@@ -576,6 +590,9 @@ function applyModeOverrides(mode: InputMode, r: AnalysisResult): AnalysisResult 
   if (mode === "log") {
     if (r.category === "log") return { ...r, category: "log" };
     return remapMisclassifiedToLog(r);
+  }
+  if (mode === "meal") {
+    return { ...r, category: "meal" };
   }
   if (mode === "pet") {
     return { ...r, category: "pet" };
