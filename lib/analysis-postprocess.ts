@@ -88,6 +88,15 @@ function resolveAnalysisDateFromUser(
     return { ...r, date: jstYmdToday() };
   }
 
+  /**
+   * 食事（meal）は写真のみで送ることが多く、モデルが古い年（例: 2024）を勝手に入れることがある。
+   * ユーザーが日付を書いていないなら必ず「今日（日本時間）」に固定する。
+   * 家計簿（レシート日付保持）だけは例外。
+   */
+  if (r.category === "meal" && !userHasCalendarHint) {
+    return { ...r, date: jstYmdToday() };
+  }
+
   if (r.category === "log" && userSrc.length === 0) {
     const bucket = [
       r.summary,
