@@ -264,6 +264,42 @@ function mealRemarksColumnD_(analysis) {
     .join(" / ");
 }
 
+/** 食事の「合計」行かどうか */
+function isMealTotalRow_(cells) {
+  if (!cells || cells.length < 4) return false;
+  const b = mustString_(cells[1]).trim();
+  const d = mustString_(cells[3]).trim();
+  return /^合計/.test(b) && /自動/.test(d);
+}
+
+/** 末尾が同日の「合計」行なら削除（追加→合計の付け直し用） */
+function deleteTrailingMealTotalRowIfAny_(sheet, ymd) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return false;
+  const cells = sheet.getRange(lastRow, 1, 1, 4).getValues()[0];
+  const a = sheetCellToApiString_(cells[0], 0);
+  if (a !== ymd) return false;
+  if (!isMealTotalRow_(cells)) return false;
+  sheet.deleteRow(lastRow);
+  return true;
+}
+
+/** 指定日の kcal を合計し、末尾に「合計」行を追加する */
+function appendMealDailyTotalRow_(sheet, ymd) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+  const values = sheet.getRange(2, 1, lastRow - 1, 4).getValues();
+  var sum = 0;
+  for (var i = 0; i < values.length; i++) {
+    const r = values[i];
+    const a = sheetCellToApiString_(r[0], 0);
+    if (a !== ymd) continue;
+    if (isMealTotalRow_(r)) continue;
+    sum += asNumber_(r[2]);
+  }
+  sheet.appendRow([ymd, "合計", sum > 0 ? Number(sum) : 0, "（自動）"]);
+}
+
 function normalizeCellForCompare_(v) {
   if (v == null) return "";
   if (typeof v === "number" && !isNaN(v)) return String(v);
@@ -377,6 +413,8 @@ function append_(analysis) {
         logRemarksColumnD_(analysis),
       ];
     } else if (analysis.category === "meal") {
+      // 同日にすでに合計行がある場合、追加の前にいったん消す（最後に付け直す）
+      deleteTrailingMealTotalRowIfAny_(sheet, analysis.date);
       row = [
         analysis.date,
         briefSummaryForSheet_(mustString_(analysis.summary)),
@@ -391,6 +429,9 @@ function append_(analysis) {
       return { deduped: true };
     }
     sheet.appendRow(row);
+    if (analysis.category === "meal") {
+      appendMealDailyTotalRow_(sheet, analysis.date);
+    }
     return { deduped: false };
   } finally {
     lock.releaseLock();
