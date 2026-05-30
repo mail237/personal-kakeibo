@@ -213,10 +213,10 @@ function modeInstruction(mode: InputMode): string {
 - meal: 食事の写真・献立・料理など、カロリー推定をしたいもの`;
   }
   if (mode === "medical") {
-    return `ユーザーは手動で「医療」を選びました。必ず category は "kakeibo" にし、fields.category は必ず "医療" に固定してください。summary は必ず "[医療]" のみ（短い見出しだけ）。詳細はすべて fields.bikou（備考）に書いてください。`;
+    return `ユーザーは手動で「医療」を選びました。必ず category は "kakeibo" にし、fields.category（勘定科目・D列）は必ず "医療" に固定してください。summary は必ず "[医療]" のみ。詳細はすべて fields.bikou（E列）に書いてください。`;
   }
   if (mode === "juku") {
-    return `ユーザーは手動で「塾関係」を選びました。必ず category は "kakeibo" にし、fields.category は必ず "塾関係" に固定してください。summary は必ず "[塾関係]" のみ（短い見出しだけ）。詳細はすべて fields.bikou（備考）に書いてください。`;
+    return `ユーザーは手動で「塾関係」を選びました。必ず category は "kakeibo" にし、fields.category（勘定科目・D列）は必ず "塾関係" に固定してください。summary は必ず "[塾関係]" のみ。詳細はすべて fields.bikou（E列）に書いてください。`;
   }
   const map: Record<
     Exclude<InputMode, "auto" | "medical" | "juku">,
@@ -251,15 +251,15 @@ ${modeInstruction(mode)}
 
 fields のルール:
 - category が kakeibo のとき:
-  { "shubetsu": "支出|収入|その他", "amount": 数値（円、不明なら0）, "category": "飲食|食費|交通費|医療|塾関係|ペット費|日用品|通信|光熱費|住居|交際|娯楽|その他", "bikou": "備考は短く（店名＋一言でよい。レシートの住所・皿別明細・税の内訳・伝票番号などの全文は書かない）" }
-- category が pet のとき: { "content": "内容（詳細）", "hospital": "病院名（なければ空文字）", "cost": 数値（円、不明なら0）, "nextDue": "次回予定（なければ空文字）" } ／ summary は短く（例: [ペット]）でよい ／ **動物病院・請求書では cost に実負担額（total_amount やお支払額）を必ず入れる（0 のままにしない）**
+  { "shubetsu": "支出|収入|その他", "amount": 数値（円、不明なら0）, "category": "勘定科目（スプレッドシートD列）。飲食|食費|交通費|医療|塾関係|ペット費|日用品|通信|光熱費|住居|交際|娯楽|その他 のいずれか", "bikou": "備考（E列）。店名＋一言でよい。レシートの住所・皿別明細・税の内訳・伝票番号などの全文は書かない" }
+- category が pet のとき: { "content": "内容（詳細）", "hospital": "病院名（なければ空文字）", "cost": 数値（円、不明なら0）, "nextDue": "次回予定（なければ空文字）", "category": "勘定科目（D列。原則 \"ペット費\"）" } ／ summary は短く（例: [ペット]）でよい ／ 詳細は E列（content 等を結合して保存） ／ **動物病院・請求書では cost に実負担額を必ず入れる**
 - category が log のとき: { "time": "時間帯（スプレッドシートのC列。例 10:00〜11:00 または 10:28。ユーザーが時間を書いたら必ずここに入れる）", "content": "詳細・場所（D列の備考。時間帯は time に書き、content にだけ書かない）", "tags": "カンマ区切りタグ（D列に続けて書く）" } ／ summary は短い見出しのみ（例: 散歩、勉強）。 ／ **ユーザーが日付を書いていなければ date は必ず今日（日本時間）。過去の日を勝手に埋めない**
 - category が meal のとき: { "calories": 数値（kcal。不明なら0）, "items": "料理名・献立（短く）", "details": "量の前提・内訳（例: ご飯150g / 唐揚げ5個 など）", "tags": "任意のタグ（カンマ区切り）" } ／ summary は短い見出し（例: 朝食、昼食、夕食、間食、または料理名）。カロリーは必ず calories に入れる（details にだけ書かない）
 
 家計簿カテゴリの補足ルール:
 - 書籍 / 本 / 参考書 / 問題集 / 教材 / 学習アプリなど「勉強に使う購入」は、原則 category を "塾関係" にしてください。
 - 動物病院の請求書で total_amount や「お支払額」がある場合は、小計や明細合計ではなくその実負担額を fields.amount に入れる。
-- summary は短い見出しだけ。bikou は店名・用途を1〜2文で（レシートを貼り付けない）。金額は必ず fields.amount（円）に入れる。
+- summary は短い見出しだけ。勘定科目は必ず fields.category（D列）。bikou は店名・用途を1〜2文で（E列。レシート全文は禁止）。金額は必ず fields.amount（C列）。
 - store_name / items / total だけの別形式に置き換えないでください。必ず category・date・fields・summary をトップレベルに含めてください。
 
 ユーザーのテキスト:
@@ -290,7 +290,7 @@ ${
   mode === "log"
     ? `**ユーザーは行動ログタブを選んでいます。画像がレシート・領収書でも category は必ず "log"。家計簿（kakeibo）や pet にしない。** 金額や店名は「買った記録」として fields.content / tags に書き、fields.time にレシート上の時刻があれば入れる（なければ空でよい）。summary は短い見出し（例: コンビニ、書店）。`
     : `レシートなら通常 kakeibo。動物病院なら pet。**pet のときも診療費の数値は必ず fields.cost に入れる（請求書 JSON なら total_amount や支払額を cost に反映。0 のみは禁止）。**
-kakeibo では金額は fields.amount に数値（円）を入れる。請求書・領収書に total_amount や保険控除後の支払額があるときはそれを優先（小計だけにしない）。fields.bikou は店名＋簡単なメモ程度（レシートの行ごとの羅列は禁止）。
+kakeibo では金額は fields.amount（C列）。勘定科目は fields.category（D列）。fields.bikou は店名＋簡単なメモ（E列。レシートの行ごとの羅列は禁止）。請求書の支払額は amount に入れる。
 行動ログでは fields.time をスプレッドシートの「時間」列にそのまま保存する（例 10:00〜11:00）。入力に「9時から11時」「10:30」などがあるときは必ず time に入れる。詳細は fields.content / tags に（時間の繰り返しは避ける）。`
 }
 

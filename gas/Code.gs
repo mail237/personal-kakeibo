@@ -5,12 +5,14 @@
  * - SPREADSHEET_ID: 保存先スプレッドシートID
  * - GAS_SHARED_SECRET: Next.js の GAS_SHARED_SECRET と同じ値
  *
- * タブ名（完全一致）。列はすべて A〜D の4列（1行目に見出し推奨）:
- * - 家計簿・医療・塾関係・ペット記録: A日付(YYYY-MM-DD) | B概要(短い一言) | C金額(数値のみ) | D備考
- * - 行動ログ: A日付 | B概要(短い一言) | C時間(例 10:00〜11:00) | D備考(詳細・タグ等)
- * - 食事: A日付 | B概要(短い一言) | Cカロリー(kcal 数値) | D備考(料理・量の前提など)
+ * タブ名（完全一致）。1行目に見出し推奨:
+ * - 家計簿・医療・塾関係・ペット記録（5列）: A日付 | B概要 | C金額 | D勘定科目 | E備考
+ * - 行動ログ（4列）: A日付 | B概要 | C時間 | D備考(詳細・タグ等)
+ * - 食事（4列）: A日付 | B概要 | Cカロリー(kcal) | D備考
  * - 家計簿で fields.category が「医療」→「医療」タブ、「塾関係」→「塾関係」タブ、それ以外→「家計簿」
- * - append は直前行と4列とも同一なら追加しない（二重送信対策）
+ * - append は直前行と全列同一なら追加しない（二重送信対策）
+ * - 家計簿・医療・塾関係・ペット・行動ログは保存後に A列日付の昇順（古い順）で並べ替え
+ * - 食事タブは「合計」行のため自動並べ替えなし（メニューからの一括整理も対象外）
  */
 
 const SHEET_NAMES = {
@@ -21,6 +23,27 @@ const SHEET_NAMES = {
   log: "行動ログ",
   meal: "食事",
 };
+
+/** D列＝勘定科目・E列＝備考のタブ */
+const SHEETS_WITH_KANJOU_COL = [
+  SHEET_NAMES.kakeibo,
+  SHEET_NAMES.medical,
+  SHEET_NAMES.juku,
+  SHEET_NAMES.pet,
+];
+
+/** 日付の古い順に並べ替えるタブ（食事は「合計」行があるため対象外） */
+const SHEETS_SORT_DATE_ASC = [
+  SHEET_NAMES.kakeibo,
+  SHEET_NAMES.medical,
+  SHEET_NAMES.juku,
+  SHEET_NAMES.pet,
+  SHEET_NAMES.log,
+];
+
+function sheetDataColumnCount_(sheetName) {
+  return SHEETS_WITH_KANJOU_COL.indexOf(sheetName) >= 0 ? 5 : 4;
+}
 
 function getProps_() {
   const p = PropertiesService.getScriptProperties();
@@ -198,6 +221,21 @@ function normalizeKakeiboRowForSheet_(analysis) {
   return { summary: sum, amount: amt, bikou: bikou };
 }
 
+/** D列: 勘定科目（fields.category または概要 [タグ]） */
+function kanjouKamokuForSheet_(analysis, fin) {
+  var f = analysis.fields || {};
+  var c = mustString_(f.category).trim();
+  if (c) return c;
+  var sum = fin ? mustString_(fin.summary) : mustString_(analysis.summary);
+  var m = sum.match(/^\[([^\]]+)\]/);
+  if (m) return m[1].trim();
+  var sheetName = resolveSheetName_(analysis);
+  if (sheetName === SHEET_NAMES.medical) return "医療";
+  if (sheetName === SHEET_NAMES.juku) return "塾関係";
+  if (analysis.category === "pet") return "ペット費";
+  return "その他";
+}
+
 /** 備考列: 家計簿は bikou（なければ memo）、ペットは病院・内容・次回 */
 function bikouFromAnalysis_(analysis) {
   const f = analysis.fields || {};
@@ -306,16 +344,17 @@ function normalizeCellForCompare_(v) {
   return String(v).trim();
 }
 
-/** 直近データ行のいずれかと4列とも同一なら true（二重送信・連打対策） */
-function isDuplicateOfRecentRows_(sheet, newRow, maxRows) {
+/** 直近データ行のいずれかと全列同一なら true（二重送信・連打対策） */
+function isDuplicateOfRecentRows_(sheet, newRow, maxRows, numCols) {
+  var cols = numCols || newRow.length || 4;
   var lastRow = sheet.getLastRow();
   if (lastRow < 2) return false;
   var max = Math.min(maxRows || 5, lastRow - 1);
   for (var offset = 0; offset < max; offset++) {
     var r = lastRow - offset;
-    var prev = sheet.getRange(r, 1, r, 4).getValues()[0];
+    var prev = sheet.getRange(r, 1, 1, cols).getValues()[0];
     var same = true;
-    for (var i = 0; i < 4; i++) {
+    for (var i = 0; i < cols; i++) {
       if (normalizeCellForCompare_(prev[i]) !== normalizeCellForCompare_(newRow[i])) {
         same = false;
         break;
@@ -324,6 +363,209 @@ function isDuplicateOfRecentRows_(sheet, newRow, maxRows) {
     if (same) return true;
   }
   return false;
+}
+
+/** A列の日付を YYYY-MM-DD 文字列に揃える（並べ替え・表示のため） */
+function normalizeDateColumnA_(sheet) {
+  var lastRow = sheet.getLastRow();
+  if (lastRow <= 1) return;
+  var numRows = lastRow - 1;
+  var range = sheet.getRange(2, 1, numRows, 1);
+  var values = range.getValues();
+  var changed = false;
+  var out = values.map(function (row) {
+    var c = row[0];
+    if (Object.prototype.toString.call(c) === "[object Date]") {
+      changed = true;
+      return [Utilities.formatDate(c, "Asia/Tokyo", "yyyy-MM-dd")];
+    }
+    var s = String(c == null ? "" : c).trim();
+    if (!s) return [""];
+    var m = s.match(/^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})/);
+    if (m) {
+      var norm =
+        m[1] +
+        "-" +
+        ("0" + m[2]).slice(-2) +
+        "-" +
+        ("0" + m[3]).slice(-2);
+      if (norm !== s) changed = true;
+      return [norm];
+    }
+    return [s];
+  });
+  if (changed) range.setValues(out);
+}
+
+/** 2行目以降を A列（日付）の昇順（古い→新しい）に並べ替え */
+function sortSheetByDateAsc_(sheet, numCols) {
+  var cols = numCols || sheetDataColumnCount_(sheet.getName());
+  var lastRow = sheet.getLastRow();
+  if (lastRow <= 1) return 0;
+  var numRows = lastRow - 1;
+  normalizeDateColumnA_(sheet);
+  sheet.getRange(2, 1, numRows, cols).sort({ column: 1, ascending: true });
+  return numRows;
+}
+
+function shouldAutoSortSheet_(sheetName) {
+  return SHEETS_SORT_DATE_ASC.indexOf(sheetName) >= 0;
+}
+
+var KANJOU_KAMOKU_NAMES_ = [
+  "飲食",
+  "食費",
+  "交通費",
+  "医療",
+  "塾関係",
+  "ペット費",
+  "日用品",
+  "通信",
+  "光熱費",
+  "住居",
+  "交際",
+  "娯楽",
+  "仕事",
+  "その他",
+];
+
+function extractKanjouFromSummaryCell_(summary) {
+  var m = mustString_(summary).match(/^\[([^\]]+)\]/);
+  return m ? m[1].trim() : "";
+}
+
+/** 旧形式で D 列に入っていた「備考」らしいか（勘定科目の短い名前ではない） */
+function looksLikeLegacyBikouInD_(d) {
+  var s = mustString_(d).trim();
+  if (!s) return false;
+  if (KANJOU_KAMOKU_NAMES_.indexOf(s) >= 0) return false;
+  if (s.length > 20) return true;
+  if (/\n|\r/.test(s)) return true;
+  if (/円|〒|丁目|番地|店|株式会社|有限|レシート|伝票|おつり|小計|合計/.test(s)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * 旧4列（D=備考）→ 5列（D=勘定科目, E=備考）へ移行。
+ * E が空で D に備考らしい文字がある行だけ処理。
+ */
+function migrateLegacyColumnDToE_(sheet) {
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return 0;
+  var numRows = lastRow - 1;
+  var width = Math.max(5, sheet.getLastColumn());
+  if (width < 4) width = 4;
+  var values = sheet.getRange(2, 1, numRows, width).getValues();
+  var changed = 0;
+  var out = [];
+  for (var i = 0; i < values.length; i++) {
+    var r = values[i];
+    while (r.length < 5) r.push("");
+    var a = r[0];
+    var b = r[1];
+    var c = r[2];
+    var d = r[3];
+    var e = r[4];
+    var eStr = mustString_(e).trim();
+    var dStr = mustString_(d).trim();
+    if (eStr) {
+      out.push([a, b, c, d, e]);
+      continue;
+    }
+    if (!dStr) {
+      out.push([a, b, c, "", ""]);
+      continue;
+    }
+    if (!looksLikeLegacyBikouInD_(dStr)) {
+      out.push([a, b, c, dStr, ""]);
+      continue;
+    }
+    var kanjou = extractKanjouFromSummaryCell_(b) || "その他";
+    out.push([a, b, c, kanjou, dStr]);
+    changed++;
+  }
+  sheet.getRange(2, 1, numRows, 5).setValues(
+    out.map(function (row) {
+      return row.slice(0, 5);
+    })
+  );
+  return changed;
+}
+
+function ensureKanjouSheetHeaders_(sheet) {
+  var a1 = mustString_(sheet.getRange(1, 1).getValue());
+  if (a1 !== "日付" && !/^date$/i.test(a1)) return;
+  sheet
+    .getRange(1, 1, 1, 5)
+    .setValues([["日付", "概要", "金額", "勘定科目", "備考"]]);
+}
+
+/** 家計簿・医療・塾・ペットの旧 D 列（備考）を E 列へ移す */
+function migrateAllLegacyColumnDToE_() {
+  var spreadsheetId = getProps_().spreadsheetId;
+  var ss = SpreadsheetApp.openById(spreadsheetId);
+  var report = [];
+  SHEETS_WITH_KANJOU_COL.forEach(function (name) {
+    var sh = ss.getSheetByName(name);
+    if (!sh) return;
+    ensureKanjouSheetHeaders_(sh);
+    var n = migrateLegacyColumnDToE_(sh);
+    if (n > 0) report.push({ sheet: name, rows: n });
+  });
+  return report;
+}
+
+/** 家計簿・医療・塾関係・ペット・行動ログをまとめて古い順に並べ替え */
+function sortAllSheetsByDateAsc_() {
+  var spreadsheetId = getProps_().spreadsheetId;
+  var ss = SpreadsheetApp.openById(spreadsheetId);
+  var sorted = [];
+  SHEETS_SORT_DATE_ASC.forEach(function (name) {
+    var sh = ss.getSheetByName(name);
+    if (!sh) return;
+    var n = sortSheetByDateAsc_(sh, sheetDataColumnCount_(name));
+    if (n > 0) sorted.push({ sheet: name, rows: n });
+  });
+  return sorted;
+}
+
+/** スプレッドシートを開いたときのメニュー */
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu("記録ノート")
+    .addItem("備考をE列へ移行（旧D列）", "menuMigrateLegacyColumnDToE_")
+    .addItem("日付で並べ替え（古い順）", "menuSortAllSheetsByDateAsc_")
+    .addToUi();
+}
+
+function menuMigrateLegacyColumnDToE_() {
+  var report = migrateAllLegacyColumnDToE_();
+  var msg =
+    report.length === 0
+      ? "移行した行はありませんでした（すでにE列にあるか、D列が空です）。"
+      : "旧D列の備考をE列へ移しました。\n" +
+        report
+          .map(function (x) {
+            return "・" + x.sheet + "（" + x.rows + "行）";
+          })
+          .join("\n");
+  SpreadsheetApp.getUi().alert(msg);
+}
+
+function menuSortAllSheetsByDateAsc_() {
+  var sorted = sortAllSheetsByDateAsc_();
+  var msg =
+    sorted.length === 0
+      ? "並べ替えるデータ行がありませんでした。"
+      : "日付の古い順に並べ替えました。\n" +
+        sorted
+          .map(function (x) {
+            return "・" + x.sheet + "（" + x.rows + "行）";
+          })
+          .join("\n");
+  SpreadsheetApp.getUi().alert(msg);
 }
 
 /** 金額列用: カテゴリごとに fields から数値を取る（行動ログは 0） */
@@ -391,18 +633,26 @@ function append_(analysis) {
     var sheetName = resolveSheetName_(analysis);
     const sheet = ss.getSheetByName(sheetName);
     if (!sheet) throw new Error(`タブ「${sheetName}」が見つかりません`);
+    var numCols = sheetDataColumnCount_(sheetName);
 
     var row;
     if (analysis.category === "kakeibo") {
       var fin = normalizeKakeiboRowForSheet_(analysis);
       var amtK = fin.amount > 0 ? Number(fin.amount) : 0;
-      row = [analysis.date, briefSummaryForSheet_(fin.summary), amtK, fin.bikou];
+      row = [
+        analysis.date,
+        briefSummaryForSheet_(fin.summary),
+        amtK,
+        kanjouKamokuForSheet_(analysis, fin),
+        fin.bikou,
+      ];
     } else if (analysis.category === "pet") {
       var amtP = amountFromAnalysis_(analysis);
       row = [
         analysis.date,
         briefSummaryForSheet_(mustString_(analysis.summary)),
         amtP > 0 ? Number(amtP) : 0,
+        kanjouKamokuForSheet_(analysis, null),
         bikouFromAnalysis_(analysis),
       ];
     } else if (analysis.category === "log") {
@@ -425,12 +675,14 @@ function append_(analysis) {
       throw new Error("category が不正です");
     }
 
-    if (isDuplicateOfRecentRows_(sheet, row, 5)) {
+    if (isDuplicateOfRecentRows_(sheet, row, 5, numCols)) {
       return { deduped: true };
     }
     sheet.appendRow(row);
     if (analysis.category === "meal") {
       appendMealDailyTotalRow_(sheet, analysis.date);
+    } else if (shouldAutoSortSheet_(sheetName)) {
+      sortSheetByDateAsc_(sheet, numCols);
     }
     return { deduped: false };
   } finally {
@@ -483,8 +735,8 @@ function recent_(limitPerSheet) {
     }
     const startRow = Math.max(2, lastRow - limit + 1);
     const numRows = lastRow - startRow + 1;
-    // A〜D（行動ログのみ C が「時間」。食事は C が kcal。それ以外は C が金額）
-    const values = sheet.getRange(startRow, 1, numRows, 4).getValues();
+    var colCount = sheetDataColumnCount_(sheetName);
+    const values = sheet.getRange(startRow, 1, numRows, colCount).getValues();
     values
       .slice()
       .reverse()
@@ -545,6 +797,14 @@ function doPost(e) {
         missingTabs: rr.missingTabs,
         headerOnlyTabs: rr.headerOnlyTabs,
       });
+    }
+    if (action === "sortByDateAsc") {
+      var sr = sortAllSheetsByDateAsc_();
+      return jsonOut_({ ok: true, sorted: sr });
+    }
+    if (action === "migrateLegacyDToE") {
+      var mr = migrateAllLegacyColumnDToE_();
+      return jsonOut_({ ok: true, migrated: mr });
     }
     return errorOut_("action が不正です", 400);
   } catch (err) {

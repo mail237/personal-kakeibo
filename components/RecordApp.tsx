@@ -37,8 +37,20 @@ function formatRecentSubline(e: RecentEntry): string {
     const n = Number(String(c).replace(/,/g, ""));
     parts.push(Number.isFinite(n) && n !== 0 ? `¥${n}` : String(c));
   }
-  const d = cells[3];
-  if (d) parts.push(String(d));
+  const isKakeiboStyle =
+    e.sheet === "kakeibo" ||
+    e.sheet === "medical" ||
+    e.sheet === "juku" ||
+    e.sheet === "pet";
+  if (isKakeiboStyle && cells.length >= 5) {
+    const kanjou = cells[3] ?? "";
+    const bikou = cells[4] ?? "";
+    if (kanjou) parts.push(String(kanjou));
+    if (bikou) parts.push(String(bikou));
+  } else {
+    const d = cells[3];
+    if (d) parts.push(String(d));
+  }
   return parts.join(" · ");
 }
 
@@ -65,6 +77,7 @@ export default function RecordApp() {
   const [recordsError, setRecordsError] = useState<string | null>(null);
   const [recordsEmptyHint, setRecordsEmptyHint] = useState<string | null>(null);
   const [recordsBusy, setRecordsBusy] = useState(false);
+  const [migrateBusy, setMigrateBusy] = useState(false);
   /** 解析中に経過秒を出す（待ち時間が長いとフリーズに見えるため） */
   const [analyzeElapsedSec, setAnalyzeElapsedSec] = useState(0);
 
@@ -104,7 +117,7 @@ export default function RecordApp() {
           );
         } else {
           setRecordsEmptyHint(
-            "データ行はありますが、A〜Dがすべて空の行だけの可能性があります。日付・概要などを1列目以降に入れた行があるか確認してください。"
+            "データ行はありますが、中身がすべて空の行だけの可能性があります。日付・概要などを入れた行があるか確認してください。"
           );
         }
       } else {
@@ -124,6 +137,39 @@ export default function RecordApp() {
   useEffect(() => {
     void loadRecords();
   }, [loadRecords]);
+
+  async function onMigrateLegacyDToE() {
+    if (
+      !window.confirm(
+        "家計簿・医療・塾関係・ペット記録で、旧D列の備考をE列へ移し、D列に勘定科目を入れます。よろしいですか？"
+      )
+    ) {
+      return;
+    }
+    setMigrateBusy(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/migrate-sheets", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "移行に失敗しました");
+      const migrated = (data.migrated ?? []) as { sheet: string; rows: number }[];
+      if (migrated.length === 0) {
+        setNotice(
+          "移行した行はありませんでした（すでにE列にあるか、対象の備考がD列にありません）。"
+        );
+      } else {
+        setNotice(
+          "備考をE列へ移しました: " +
+            migrated.map((x) => `${x.sheet} ${x.rows}行`).join("、")
+        );
+      }
+      await loadRecords();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "移行に失敗しました。");
+    } finally {
+      setMigrateBusy(false);
+    }
+  }
 
   async function onAnalyze() {
     setError(null);
@@ -396,6 +442,14 @@ export default function RecordApp() {
           <p className="text-sm font-medium text-zinc-900">
             {previews[previewIdx].summary}
           </p>
+          {previews[previewIdx].category === "kakeibo" &&
+            typeof previews[previewIdx].fields.category === "string" &&
+            String(previews[previewIdx].fields.category).trim() !== "" && (
+              <p className="text-sm text-zinc-700">
+                <span className="font-medium text-zinc-500">勘定科目</span>{" "}
+                {String(previews[previewIdx].fields.category)}
+              </p>
+            )}
           {typeof previews[previewIdx].fields.bikou === "string" &&
             String(previews[previewIdx].fields.bikou).trim() !== "" && (
               <p className="text-sm leading-relaxed text-zinc-600">
@@ -432,14 +486,24 @@ export default function RecordApp() {
       <section className="space-y-3">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <h2 className="text-sm font-semibold text-zinc-800">直近の記録</h2>
-          <button
-            type="button"
-            onClick={() => void loadRecords()}
-            disabled={recordsBusy}
-            className="shrink-0 rounded-lg border border-emerald-600 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-900 shadow-sm hover:bg-emerald-100 disabled:opacity-50"
-          >
-            {recordsBusy ? "取得中…" : "一覧を更新"}
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => void onMigrateLegacyDToE()}
+              disabled={recordsBusy || migrateBusy || busy !== null}
+              className="shrink-0 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-800 shadow-sm hover:bg-zinc-50 disabled:opacity-50"
+            >
+              {migrateBusy ? "移行中…" : "備考→E列へ移行"}
+            </button>
+            <button
+              type="button"
+              onClick={() => void loadRecords()}
+              disabled={recordsBusy || migrateBusy}
+              className="shrink-0 rounded-lg border border-emerald-600 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-900 shadow-sm hover:bg-emerald-100 disabled:opacity-50"
+            >
+              {recordsBusy ? "取得中…" : "一覧を更新"}
+            </button>
+          </div>
         </div>
         <p className="text-xs text-zinc-500">
           一覧は画面の一番下です。入力欄や「AI で解析」の下までスクロールしてください。

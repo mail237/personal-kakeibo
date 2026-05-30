@@ -25,10 +25,11 @@ export type KakeiboRow = {
   date: string;
   shubetsu: string;
   amount: number | string;
+  /** 勘定科目（スプレッドシート D 列） */
   category: string;
   /** 旧データ用。詳細は bikou を優先 */
   memo?: string;
-  /** 備考（詳細） */
+  /** 備考（詳細・スプレッドシート E 列） */
   bikou?: string;
 };
 

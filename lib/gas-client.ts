@@ -71,6 +71,18 @@ export type GasRecentResult = {
   headerOnlyTabs: string[];
 };
 
+export type GasMigrateResult = {
+  migrated: { sheet: string; rows: number }[];
+};
+
+/** 旧 D 列（備考）を E 列へ。D 列に勘定科目を入れる */
+export async function gasMigrateLegacyDToE(): Promise<GasMigrateResult> {
+  const res = await gasPost<{ ok: true; migrated?: GasMigrateResult["migrated"] }>(
+    { action: "migrateLegacyDToE" }
+  );
+  return { migrated: res.migrated ?? [] };
+}
+
 export async function gasRecent(limitPerSheet = 6): Promise<GasRecentResult> {
   const res = await gasPost<{
     ok: true;

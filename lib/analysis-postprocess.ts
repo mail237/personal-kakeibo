@@ -1,3 +1,4 @@
+import { kanjouFromKakeiboAnalysis, normalizeKanjouKamoku } from "./kanjou-kamoku";
 import type { AnalysisResult } from "./types";
 
 /** 日本時間の今日 YYYY-MM-DD */
@@ -400,6 +401,16 @@ function compressKakeiboBikouField(r: AnalysisResult): AnalysisResult {
   };
 }
 
+/** 勘定科目（D列）を fields.category に必ず入れる */
+function ensureKanjouKamokuField(r: AnalysisResult): AnalysisResult {
+  if (r.category !== "kakeibo") return r;
+  const kanjou = kanjouFromKakeiboAnalysis(r.summary, r.fields);
+  return {
+    ...r,
+    fields: { ...r.fields, category: normalizeKanjouKamoku(kanjou) },
+  };
+}
+
 /**
  * 解析直後・保存直前のどちらでも使う。
  * 金額は「概要が長いとき」備考へ移す前に拾い、移した後にもう一度拾う（順序バグ防止）。
@@ -415,5 +426,6 @@ export function postprocessKakeiboForSave(
   const afterAmount1 = fillKakeiboAmountIfMissing(afterPet);
   const afterSummary = normalizeKakeiboShortSummary(afterAmount1);
   const afterAmount2 = fillKakeiboAmountIfMissing(afterSummary);
-  return compressKakeiboBikouField(afterAmount2);
+  const afterBikou = compressKakeiboBikouField(afterAmount2);
+  return ensureKanjouKamokuField(afterBikou);
 }
